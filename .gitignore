@@ -1,0 +1,9 @@
+# Entorno virtual (muy pesado)
+venv/
+
+# Archivo con contraseñas y claves secretas
+.env
+
+# Archivos temporales de Python
+__pycache__/
+*.pyc
