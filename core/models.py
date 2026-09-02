@@ -128,6 +128,8 @@ class Prediccion(models.Model):
 
     class Meta:
         db_table = "prediccion"
+        verbose_name = "Predicción"
+        verbose_name_plural = "Predicciones"
         indexes = [
             models.Index(
                 fields=["producto", "fecha_pronosticada"],
@@ -206,6 +208,11 @@ class Usuario(AbstractBaseUser):
 
     def es_comprador(self):
         return self.rol == self.Rol.COMPRADOR
+    def has_perm(self, perm, obj=None):
+        return self.is_superuser_admin
+
+    def has_module_perms(self, app_label):
+        return self.is_superuser_admin or self.is_staff
 
 
 class Alerta(models.Model):
@@ -231,6 +238,8 @@ class Alerta(models.Model):
 
     class Meta:
         db_table = "alerta"
+        verbose_name = "Alerta"
+        verbose_name_plural = "Alertas"
         indexes = [
             models.Index(fields=["producto"], name="idx_alerta_producto"),
             models.Index(fields=["leida"], name="idx_alerta_leida"),
@@ -249,6 +258,8 @@ class Configuracion(models.Model):
 
     class Meta:
         db_table = "configuracion"
+        verbose_name = "Configuración"
+        verbose_name_plural = "Configuraciones"
 
     def __str__(self):
         return f"{self.clave} = {self.valor}"

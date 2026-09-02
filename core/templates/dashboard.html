@@ -9,19 +9,61 @@
     <nav class="navbar navbar-dark bg-dark">
         <div class="container">
             <span class="navbar-brand">Fresh Analytics</span>
+            <span class="text-white-50 small me-3">{{ usuario.nombre }} · {{ usuario.rol }}</span>
             <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">Cerrar sesión</a>
         </div>
     </nav>
 
     <div class="container mt-4">
-        <div class="alert alert-success">
-            Bienvenido, <strong>{{ usuario.nombre }}</strong> — Rol: <strong>{{ usuario.rol }}</strong>
+
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <p class="text-muted small mb-1">Ventas de hoy</p>
+                        <p class="fs-4 mb-0">Q {{ ventas_hoy|floatformat:2 }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <p class="text-muted small mb-1">Merma de hoy</p>
+                        <p class="fs-4 mb-0">Q {{ merma_hoy|floatformat:2 }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm border-warning">
+                    <div class="card-body">
+                        <p class="text-muted small mb-1">Por vencer (7 días)</p>
+                        <p class="fs-4 mb-0">{{ por_vencer_semana }} lote(s)</p>
+                    </div>
+                </div>
+            </div>
         </div>
-        <p class="text-muted">
-            Este es un dashboard de prueba. El login con roles (RF-01) ya está
-            funcionando de extremo a extremo: PostgreSQL real → Django →
-            navegador.
-        </p>
+
+        <h6 class="mb-2">Productos próximos a vencer</h6>
+        {% if alertas %}
+            <div class="list-group mb-4">
+                {% for alerta in alertas %}
+                    <div class="list-group-item d-flex align-items-center gap-2">
+                        <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
+                        <span class="flex-grow-1">{{ alerta.producto }} — {{ alerta.cantidad }} unidades</span>
+                        <span class="text-muted small">
+                            {% if alerta.dias_restantes == 0 %}
+                                Vence hoy
+                            {% else %}
+                                Vence en {{ alerta.dias_restantes }} día(s)
+                            {% endif %}
+                        </span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-muted">No hay productos próximos a vencer en los próximos 7 días.</p>
+        {% endif %}
+
     </div>
 </body>
 </html>
