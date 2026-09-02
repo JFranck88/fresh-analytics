@@ -1,18 +1,18 @@
 """
 Modelos de Fresh Analytics.
 
-Traducción directa de la sección 5.1 (Diseño de Datos) del Capítulo V
-del Trabajo de Graduación. Los nombres de índices coinciden con los
-documentados en 5.1.6 para que el código y la tesis sean el mismo
-artefacto, no dos versiones distintas.
+Usuario ahora extiende AbstractBaseUser para que Django lo reconozca
+como el modelo de autenticación oficial (ver settings.AUTH_USER_MODEL).
+La columna sigue llamándose 'contrasena_hash' como en el ER (5.1.6.7);
+solo el atributo interno de Django se llama 'password' por convención
+del framework - la tabla física no cambia de nombre de columna.
 """
 
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.db import models
 
 
 class Producto(models.Model):
-    """5.1.6.1 - Catálogo maestro de productos perecederos."""
-
     class Categoria(models.TextChoices):
         LACTEOS = "LACTEOS", "Lácteos"
         CARNES = "CARNES", "Carnes"
@@ -31,8 +31,6 @@ class Producto(models.Model):
 
     class Meta:
         db_table = "producto"
-        verbose_name = "Producto"
-        verbose_name_plural = "Productos"
         indexes = [
             models.Index(fields=["categoria"], name="idx_producto_categoria"),
             models.Index(fields=["activo"], name="idx_producto_activo"),
@@ -43,8 +41,6 @@ class Producto(models.Model):
 
 
 class Venta(models.Model):
-    """5.1.6.2 - Historial de transacciones de venta."""
-
     id_venta = models.BigAutoField(primary_key=True)
     producto = models.ForeignKey(
         Producto, on_delete=models.PROTECT, db_column="id_producto",
@@ -57,8 +53,6 @@ class Venta(models.Model):
 
     class Meta:
         db_table = "venta"
-        verbose_name = "Venta"
-        verbose_name_plural = "Ventas"
         indexes = [
             models.Index(fields=["fecha"], name="idx_venta_fecha"),
             models.Index(fields=["producto"], name="idx_venta_producto"),
@@ -70,8 +64,6 @@ class Venta(models.Model):
 
 
 class Inventario(models.Model):
-    """5.1.6.3 - Stock por lote, con fechas de ingreso y vencimiento."""
-
     id_inventario = models.BigAutoField(primary_key=True)
     producto = models.ForeignKey(
         Producto, on_delete=models.PROTECT, db_column="id_producto",
@@ -84,8 +76,6 @@ class Inventario(models.Model):
 
     class Meta:
         db_table = "inventario"
-        verbose_name = "Inventario"
-        verbose_name_plural = "Inventario"
         indexes = [
             models.Index(fields=["producto"], name="idx_inventario_producto"),
             models.Index(fields=["fecha_vencimiento"], name="idx_inventario_vencim"),
@@ -100,8 +90,6 @@ class Inventario(models.Model):
 
 
 class Merma(models.Model):
-    """5.1.6.4 - Productos desechados y su causa."""
-
     class Motivo(models.TextChoices):
         VENCIMIENTO = "VENCIMIENTO", "Vencimiento"
         DANO = "DANO", "Daño"
@@ -120,16 +108,12 @@ class Merma(models.Model):
 
     class Meta:
         db_table = "merma"
-        verbose_name = "Merma"
-        verbose_name_plural = "Mermas"
 
     def __str__(self):
         return f"Merma #{self.id_merma} - {self.producto} ({self.motivo})"
 
 
 class Prediccion(models.Model):
-    """5.1.6.5 - Salida del modelo Prophet por producto y fecha futura."""
-
     id_prediccion = models.BigAutoField(primary_key=True)
     producto = models.ForeignKey(
         Producto, on_delete=models.CASCADE, db_column="id_producto",
@@ -144,8 +128,6 @@ class Prediccion(models.Model):
 
     class Meta:
         db_table = "prediccion"
-        verbose_name = "Predicción"
-        verbose_name_plural = "Predicciones"
         indexes = [
             models.Index(
                 fields=["producto", "fecha_pronosticada"],
@@ -157,9 +139,30 @@ class Prediccion(models.Model):
         return f"Predicción {self.producto} -> {self.fecha_pronosticada}"
 
 
-class Usuario(models.Model):
-    """5.1.6.7 - Usuarios del sistema Fresh Analytics."""
+class UsuarioManager(BaseUserManager):
+    """Gestor requerido por Django para crear usuarios y superusuarios."""
 
+    def create_user(self, correo, nombre, rol="COMPRADOR", password=None):
+        if not correo:
+            raise ValueError("El correo es obligatorio")
+        usuario = self.model(
+            correo=self.normalize_email(correo), nombre=nombre, rol=rol
+        )
+        usuario.set_password(password)
+        usuario.save(using=self._db)
+        return usuario
+
+    def create_superuser(self, correo, nombre, rol=None, password=None, **extra_fields):
+        usuario = self.create_user(
+            correo, nombre, rol="ADMINISTRADOR", password=password
+        )
+        usuario.is_staff = True
+        usuario.is_superuser_admin = True
+        usuario.save(using=self._db)
+        return usuario
+
+
+class Usuario(AbstractBaseUser):
     class Rol(models.TextChoices):
         ADMINISTRADOR = "ADMINISTRADOR", "Administrador"
         GERENTE = "GERENTE", "Gerente"
@@ -169,13 +172,24 @@ class Usuario(models.Model):
     nombre = models.CharField(max_length=100)
     correo = models.EmailField(max_length=100, unique=True)
     rol = models.CharField(max_length=20, choices=Rol.choices)
-    contrasena_hash = models.CharField(max_length=255)
+    # Mismo nombre de columna del ER (contrasena_hash); Django la maneja
+    # internamente vía self.password, set_password() y check_password().
+    password = models.CharField(max_length=255, db_column="contrasena_hash")
     ultimo_acceso = models.DateTimeField(null=True, blank=True)
+
+    # Campos técnicos mínimos que Django exige para el login (no son
+    # parte del negocio, son requisito del framework):
+    is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(default=False)
+    is_superuser_admin = models.BooleanField(default=False)
+
+    USERNAME_FIELD = "correo"
+    REQUIRED_FIELDS = ["nombre", "rol"]
+
+    objects = UsuarioManager()
 
     class Meta:
         db_table = "usuario"
-        verbose_name = "Usuario"
-        verbose_name_plural = "Usuarios"
         indexes = [
             models.Index(fields=["correo"], name="idx_usuario_correo"),
             models.Index(fields=["rol"], name="idx_usuario_rol"),
@@ -184,16 +198,17 @@ class Usuario(models.Model):
     def __str__(self):
         return f"{self.nombre} ({self.rol})"
 
+    def es_administrador(self):
+        return self.rol == self.Rol.ADMINISTRADOR
+
+    def es_gerente(self):
+        return self.rol == self.Rol.GERENTE
+
+    def es_comprador(self):
+        return self.rol == self.Rol.COMPRADOR
+
 
 class Alerta(models.Model):
-    """
-    5.1.6.6 - Notificaciones automáticas sobre productos en riesgo.
-
-    Relación "lee" con Usuario: 1 (Usuario, obligatorio) a 0..N (Alerta),
-    tal como está documentado en 5.1.6.6 y 5.1.6.7 ("relación opcional").
-    Por eso el FK vive aquí, del lado "muchos", y es nulo.
-    """
-
     class Tipo(models.TextChoices):
         VENCIMIENTO = "VENCIMIENTO", "Vencimiento"
         STOCK_BAJO = "STOCK_BAJO", "Stock bajo"
@@ -216,8 +231,6 @@ class Alerta(models.Model):
 
     class Meta:
         db_table = "alerta"
-        verbose_name = "Alerta"
-        verbose_name_plural = "Alertas"
         indexes = [
             models.Index(fields=["producto"], name="idx_alerta_producto"),
             models.Index(fields=["leida"], name="idx_alerta_leida"),
@@ -228,8 +241,6 @@ class Alerta(models.Model):
 
 
 class Configuracion(models.Model):
-    """5.1.6.8 - Parámetros ajustables del sistema."""
-
     id_config = models.AutoField(primary_key=True)
     clave = models.CharField(max_length=50, unique=True)
     valor = models.CharField(max_length=255)
@@ -238,10 +249,6 @@ class Configuracion(models.Model):
 
     class Meta:
         db_table = "configuracion"
-        verbose_name = "Configuración"
-        verbose_name_plural = "Configuraciones"
 
     def __str__(self):
         return f"{self.clave} = {self.valor}"
-
-# Create your models here.

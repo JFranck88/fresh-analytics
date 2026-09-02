@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'core',
 ]
+AUTH_USER_MODEL = "core.Usuario"
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -52,6 +53,10 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'fresh_analytics_project.urls'
+
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "dashboard"
+LOGOUT_REDIRECT_URL = "login"
 
 TEMPLATES = [
     {
