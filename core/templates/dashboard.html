@@ -42,7 +42,9 @@
                 </div>
             </div>
         </div>
-
+        <a href="{% url 'registrar_merma' %}" class="btn btn-outline-dark btn-sm mb-3">+ Registrar merma</a>
+        <a href="{% url 'listar_mermas' %}" class="btn btn-outline-secondary btn-sm mb-3">Ver historial de mermas</a>
+        <a href="{% url 'listar_alertas' %}" class="btn btn-outline-warning btn-sm mb-3">Ver alertas</a>
         <h6 class="mb-2">Productos próximos a vencer</h6>
         {% if alertas %}
             <div class="list-group mb-4">
