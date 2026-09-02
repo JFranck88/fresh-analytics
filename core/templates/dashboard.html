@@ -45,6 +45,8 @@
         <a href="{% url 'registrar_merma' %}" class="btn btn-outline-dark btn-sm mb-3">+ Registrar merma</a>
         <a href="{% url 'listar_mermas' %}" class="btn btn-outline-secondary btn-sm mb-3">Ver historial de mermas</a>
         <a href="{% url 'listar_alertas' %}" class="btn btn-outline-warning btn-sm mb-3">Ver alertas</a>
+        <a href="{% url 'listar_predicciones' %}" class="btn btn-outline-primary btn-sm mb-3">Ver predicciones</a>
+        <a href="{% url 'listar_recomendaciones' %}" class="btn btn-outline-success btn-sm mb-3">Ver recomendaciones</a>
         <h6 class="mb-2">Productos próximos a vencer</h6>
         {% if alertas %}
             <div class="list-group mb-4">
