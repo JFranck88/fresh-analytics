@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h5 class="mb-3">Parámetros del sistema</h5>
+
+<div class="row">
+    <div class="col-md-5 mb-4">
+        <form method="post">
+            {% csrf_token %}
+            <div class="mb-2"><label class="form-label">Clave</label>{{ form.clave }}</div>
+            <div class="mb-2"><label class="form-label">Valor</label>{{ form.valor }}</div>
+            <div class="mb-2"><label class="form-label">Descripción</label>{{ form.descripcion }}</div>
+            <button type="submit" class="btn btn-primary btn-sm">Guardar parámetro</button>
+        </form>
+    </div>
+    <div class="col-md-7">
+        <table class="table table-striped bg-white">
+            <thead><tr><th>Clave</th><th>Valor</th><th>Descripción</th></tr></thead>
+            <tbody>
+                {% for c in configuraciones %}
+                <tr><td>{{ c.clave }}</td><td>{{ c.valor }}</td><td class="text-muted small">{{ c.descripcion }}</td></tr>
+                {% empty %}
+                <tr><td colspan="3" class="text-center text-muted">Sin parámetros configurados todavía.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

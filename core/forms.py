@@ -1,7 +1,7 @@
 from django.contrib.auth.forms import AuthenticationForm
 from django import forms
 
-from .models import Merma
+from .models import Merma, Usuario, Configuracion
 
 
 class LoginForm(AuthenticationForm):
@@ -69,3 +69,16 @@ class CrearUsuarioForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["rol"].choices = [("", "Selecciona un rol")] + list(Usuario.Rol.choices)
+
+        from .models import Configuracion
+
+
+class ConfiguracionForm(forms.ModelForm):
+    class Meta:
+        model = Configuracion
+        fields = ["clave", "valor", "descripcion"]
+        widgets = {
+            "clave": forms.TextInput(attrs={"class": "form-control"}),
+            "valor": forms.TextInput(attrs={"class": "form-control"}),
+            "descripcion": forms.Textarea(attrs={"class": "form-control", "rows": 2}),
+        }

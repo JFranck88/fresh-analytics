@@ -1,19 +1,29 @@
+import io
 from datetime import timedelta
 
-from .decorators import rol_requerido
 from django.contrib import messages
 from django.db.models import Sum, F, DecimalField
+from django.http import FileResponse
 from django.shortcuts import render, redirect
 from django.utils import timezone
-import io
-from django.http import FileResponse
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 
-from .models import Venta, Merma, Inventario, Prediccion, Producto
-from .forms import MermaForm
+from .decorators import rol_requerido
+from .forms import MermaForm, CrearUsuarioForm, ConfiguracionForm
+from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion
+
+
+def obtener_parametro(clave, default):
+    """Lee un valor desde la tabla Configuracion; si no existe, usa el
+    default. Así el Administrador puede ajustar umbrales de negocio
+    sin que un desarrollador tenga que tocar el código (RF Figura 20)."""
+    try:
+        return Configuracion.objects.get(clave=clave).valor
+    except Configuracion.DoesNotExist:
+        return default
 
 
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
@@ -31,6 +41,7 @@ def dashboard(request):
         total=Sum("costo_perdida")
     )["total"] or 0
 
+    dias_umbral_rojo = int(obtener_parametro("dias_alerta_vencimiento", 3))
     limite = hoy + timedelta(days=7)
     lotes_por_vencer = (
         Inventario.objects.filter(
@@ -43,14 +54,12 @@ def dashboard(request):
     alertas = []
     for lote in lotes_por_vencer:
         dias_restantes = (lote.fecha_vencimiento - hoy).days
-        alertas.append(
-            {
-                "producto": lote.producto.nombre,
-                "dias_restantes": dias_restantes,
-                "cantidad": lote.cantidad,
-                "nivel": "danger" if dias_restantes <= 3 else "warning",
-            }
-        )
+        alertas.append({
+            "producto": lote.producto.nombre,
+            "dias_restantes": dias_restantes,
+            "cantidad": lote.cantidad,
+            "nivel": "danger" if dias_restantes <= dias_umbral_rojo else "warning",
+        })
 
     contexto = {
         "usuario": request.user,
@@ -62,7 +71,7 @@ def dashboard(request):
     return render(request, "dashboard.html", contexto)
 
 
-@rol_requerido("GERENTE", "COMPRADOR")
+@rol_requerido("COMPRADOR")
 def registrar_merma(request):
     if request.method == "POST":
         form = MermaForm(request.POST)
@@ -72,17 +81,19 @@ def registrar_merma(request):
             return redirect("dashboard")
     else:
         form = MermaForm(initial={"fecha": timezone.localdate()})
-
     return render(request, "registrar_merma.html", {"form": form})
 
-@rol_requerido("COMPRADOR")
+
+@rol_requerido("GERENTE", "COMPRADOR")
 def listar_mermas(request):
     mermas = Merma.objects.select_related("producto").order_by("-fecha")[:100]
     return render(request, "listar_mermas.html", {"mermas": mermas})
 
-@rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
+
+@rol_requerido("GERENTE", "COMPRADOR")
 def listar_alertas(request):
     hoy = timezone.localdate()
+    dias_umbral_rojo = int(obtener_parametro("dias_alerta_vencimiento", 3))
     limite = hoy + timedelta(days=7)
     lotes = (
         Inventario.objects.filter(
@@ -95,18 +106,14 @@ def listar_alertas(request):
     alertas = []
     for lote in lotes:
         dias_restantes = (lote.fecha_vencimiento - hoy).days
-        alertas.append(
-            {
-                "producto": lote.producto.nombre,
-                "dias_restantes": dias_restantes,
-                "cantidad": lote.cantidad,
-                "nivel": "danger" if dias_restantes <= 3 else "warning",
-            }
-        )
+        alertas.append({
+            "producto": lote.producto.nombre,
+            "dias_restantes": dias_restantes,
+            "cantidad": lote.cantidad,
+            "nivel": "danger" if dias_restantes <= dias_umbral_rojo else "warning",
+        })
 
     return render(request, "listar_alertas.html", {"alertas": alertas})
-
-from .models import Prediccion
 
 
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
@@ -125,7 +132,9 @@ def listar_predicciones(request):
         request, "listar_predicciones.html",
         {"predicciones": predicciones, "fecha_corrida": fecha_max},
     )
-@rol_requerido("GERENTE", "COMPRADOR")
+
+
+@rol_requerido("COMPRADOR")
 def listar_recomendaciones(request):
     hoy = timezone.localdate()
     fecha_max = Prediccion.objects.order_by("-fecha_prediccion").values_list(
@@ -152,6 +161,8 @@ def listar_recomendaciones(request):
         })
 
     return render(request, "listar_recomendaciones.html", {"recomendaciones": recomendaciones})
+
+
 @rol_requerido("COMPRADOR")
 def generar_orden_compra(request):
     hoy = timezone.localdate()
@@ -198,9 +209,6 @@ def generar_orden_compra(request):
     buffer.seek(0)
     return FileResponse(buffer, as_attachment=True, filename=f"orden_compra_{hoy}.pdf")
 
-from .forms import CrearUsuarioForm
-from .models import Usuario
-
 
 @rol_requerido("ADMINISTRADOR")
 def listar_usuarios(request):
@@ -219,3 +227,21 @@ def crear_usuario(request):
     else:
         form = CrearUsuarioForm()
     return render(request, "crear_usuario.html", {"form": form})
+
+
+@rol_requerido("ADMINISTRADOR")
+def listar_configuracion(request):
+    if request.method == "POST":
+        form = ConfiguracionForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Parámetro guardado.")
+            return redirect("listar_configuracion")
+    else:
+        form = ConfiguracionForm()
+
+    configuraciones = Configuracion.objects.all().order_by("clave")
+    return render(
+        request, "listar_configuracion.html",
+        {"form": form, "configuraciones": configuraciones},
+    )

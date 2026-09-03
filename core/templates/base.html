@@ -20,8 +20,9 @@
                     <a href="{% url 'listar_recomendaciones' %}" class="nav-link">Recomendaciones</a>
                 {% endif %}
                 {% if user.rol == "ADMINISTRADOR" or user.is_superuser_admin %}
-                     <a href="{% url 'listar_usuarios' %}" class="nav-link">Usuarios</a>
-{% endif %}
+                <a href="{% url 'listar_usuarios' %}" class="nav-link">Usuarios</a>
+                {% endif %}
+                <a href="{% url 'listar_configuracion' %}" class="nav-link">Configuración</a>
             </div>
             <span class="text-white-50 small me-3">{{ user.nombre }} · {{ user.rol }}</span>
             <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">Cerrar sesión</a>
