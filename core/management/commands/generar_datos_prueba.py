@@ -5,11 +5,8 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from core.models import Producto, Venta, Inventario, Merma
+from core.clima import lluvia_sintetica
 
-
-# Catálogo base. Si un producto con ese nombre ya existe (por ejemplo los
-# que Francisco cargó a mano desde el admin), NO se sobreescribe - se
-# reutiliza tal cual está.
 CATALOGO = [
     ("Leche entera 1L", "LACTEOS", 10, "Lacteos San Miguel", 6.00, 9.00),
     ("Queso fresco", "LACTEOS", 10, "Lacteos San Miguel", 18.00, 25.00),
@@ -27,12 +24,8 @@ CATALOGO = [
     ("Pan de molde", "PANADERIA", 7, "Panificadora Ideal", 12.00, 18.00),
 ]
 
-# Factor de venta por día de la semana (0=lunes ... 6=domingo).
-# Viernes y sábado suben, martes/miércoles bajan - patrón documentado
-# en las entrevistas del Capítulo IV.
 FACTOR_SEMANA = {0: 0.9, 1: 0.8, 2: 0.8, 3: 0.95, 4: 1.3, 5: 1.4, 6: 1.1}
 
-# Demanda base diaria aproximada por categoría (unidades/día).
 BASE_DEMANDA = {
     "LACTEOS": 25,
     "CARNES": 18,
@@ -43,18 +36,11 @@ BASE_DEMANDA = {
 
 
 class Command(BaseCommand):
-    help = "Genera historial sintético realista de ventas, inventario y mermas."
+    help = "Genera historial sintético (ventas, inventario, mermas, efecto de lluvia)."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--dias", type=int, default=730,
-            help="Cuántos días hacia atrás generar (default 730 = 2 años).",
-        )
-        parser.add_argument(
-            "--limpiar", action="store_true",
-            help="Borra Venta/Merma/Inventario existentes antes de generar "
-                 "(los Productos y Usuarios NO se tocan).",
-        )
+        parser.add_argument("--dias", type=int, default=730)
+        parser.add_argument("--limpiar", action="store_true")
 
     def handle(self, *args, **options):
         dias = options["dias"]
@@ -70,11 +56,8 @@ class Command(BaseCommand):
             producto, _ = Producto.objects.get_or_create(
                 nombre=nombre,
                 defaults=dict(
-                    categoria=categoria,
-                    vida_util_dias=vida_util,
-                    proveedor=proveedor,
-                    precio_compra=p_compra,
-                    precio_venta=p_venta,
+                    categoria=categoria, vida_util_dias=vida_util, proveedor=proveedor,
+                    precio_compra=p_compra, precio_venta=p_venta,
                 ),
             )
             productos.append(producto)
@@ -90,11 +73,18 @@ class Command(BaseCommand):
             factor_semana = FACTOR_SEMANA[fecha.weekday()]
             factor_quincena = 1.25 if fecha.day in (14, 15, 16, 29, 30, 31, 1) else 1.0
             factor_estacional = 1.15 if fecha.month in (9, 10, 11, 12) else 1.0
+            llueve_hoy = lluvia_sintetica(fecha)
             factor_total = factor_semana * factor_quincena * factor_estacional
 
             for producto in productos:
                 base = BASE_DEMANDA.get(producto.categoria, 20)
                 cantidad_dia = max(0, round(random.gauss(base * factor_total, base * 0.15)))
+
+                # Efecto del clima (RF-08): días de lluvia reducen la venta
+                # de productos frescos, coherente con menos flujo de
+                # clientes comprando perecederos delicados ese día.
+                if llueve_hoy and producto.categoria in ("FRUTAS", "VERDURAS"):
+                    cantidad_dia = max(0, round(cantidad_dia * 0.88))
 
                 if cantidad_dia <= 0:
                     continue
@@ -108,14 +98,12 @@ class Command(BaseCommand):
                     promocion_aplicada=random.random() < 0.05,
                 ))
 
-                # Merma: no todos los días, ~1.32% acumulado, con la regla
-                # de daño mecánico/pardeamiento concentrada en Frutas/Verduras.
                 if random.random() < 0.35:
                     cantidad_merma = round(cantidad_dia * random.uniform(0.005, 0.03), 1)
                     if cantidad_merma > 0:
                         if producto.categoria in ("FRUTAS", "VERDURAS"):
                             if producto.nombre == "Tomate de riñón":
-                                pesos = [0.25, 0.65, 0.10]  # tomate resiste más el pardeamiento
+                                pesos = [0.25, 0.65, 0.10]
                             else:
                                 pesos = [0.55, 0.35, 0.10]
                             motivo = random.choices(
@@ -127,24 +115,20 @@ class Command(BaseCommand):
                             )[0]
 
                         mermas_bulk.append(Merma(
-                            producto=producto,
-                            fecha=fecha,
-                            cantidad=cantidad_merma,
+                            producto=producto, fecha=fecha, cantidad=cantidad_merma,
                             motivo=motivo,
                             costo_perdida=round(
                                 float(cantidad_merma) * float(producto.precio_compra), 2
                             ),
                         ))
 
-            # Reabastecimiento de inventario cada 3 días
             if dia_num % 3 == 0:
                 for producto in productos:
                     cantidad_lote = round(
                         BASE_DEMANDA.get(producto.categoria, 20) * random.uniform(2.5, 4)
                     )
                     inventarios_bulk.append(Inventario(
-                        producto=producto,
-                        fecha_ingreso=fecha,
+                        producto=producto, fecha_ingreso=fecha,
                         fecha_vencimiento=fecha + timedelta(days=producto.vida_util_dias),
                         cantidad=cantidad_lote,
                         lote=f"L-{fecha.strftime('%Y%m%d')}-{producto.id_producto}",
@@ -171,5 +155,5 @@ class Command(BaseCommand):
             Inventario.objects.bulk_create(inventarios_bulk)
 
         self.stdout.write(self.style.SUCCESS(
-            f"Listo: {dias} días generados para {len(productos)} productos."
+            f"Listo: {dias} días generados para {len(productos)} productos (con efecto de lluvia)."
         ))

@@ -8,12 +8,12 @@ from django.utils import timezone
 from prophet import Prophet
 
 from core.models import Producto, Venta, Prediccion
+from core.clima import lluvia_sintetica, pronostico_lluvia_real
 
 DIAS_QUINCENA = [14, 15, 16, 29, 30, 31, 1]
 
 
 def obtener_serie_diaria(producto):
-    """Devuelve un DataFrame con columnas ds/y/es_quincena, una fila por día vendido."""
     filas = (
         Venta.objects.filter(producto=producto)
         .annotate(dia=TruncDate("fecha"))
@@ -27,26 +27,34 @@ def obtener_serie_diaria(producto):
     df = df.rename(columns={"dia": "ds", "total": "y"})
     df["ds"] = pd.to_datetime(df["ds"])
     df["es_quincena"] = df["ds"].dt.day.isin(DIAS_QUINCENA).astype(int)
+    df["lluvia"] = df["ds"].apply(lambda d: lluvia_sintetica(d.date()))
     return df
 
 
 def construir_modelo():
-    """Crea un Prophet con festivos de Guatemala y el regresor de quincena
-    ya registrados (RF-08). Se usa una función para no repetir la
-    configuración entre el modelo de validación y el modelo final."""
     modelo = Prophet(interval_width=0.80, weekly_seasonality=True, yearly_seasonality=True)
     modelo.add_country_holidays(country_name="GT")
     modelo.add_regressor("es_quincena")
+    modelo.add_regressor("lluvia")
     return modelo
 
 
-def agregar_quincena_a_futuro(df_futuro):
+def agregar_regresores_a_futuro(df_futuro, usar_pronostico_real=False):
     df_futuro["es_quincena"] = df_futuro["ds"].dt.day.isin(DIAS_QUINCENA).astype(int)
+
+    pronostico = pronostico_lluvia_real() if usar_pronostico_real else {}
+
+    def calcular_lluvia(ds):
+        fecha = ds.date()
+        if fecha in pronostico:
+            return 1 if pronostico[fecha] >= 0.4 else 0
+        return lluvia_sintetica(fecha)
+
+    df_futuro["lluvia"] = df_futuro["ds"].apply(calcular_lluvia)
     return df_futuro
 
 
 def calcular_mape(reales, predichos):
-    """MAPE simple, ignorando días con venta real de 0 (división por cero)."""
     errores = []
     for real, pred in zip(reales, predichos):
         if real:
@@ -57,7 +65,7 @@ def calcular_mape(reales, predichos):
 
 
 class Command(BaseCommand):
-    help = "Entrena Prophet por producto con festivos GT y quincena, guarda predicciones (RF-03/RF-08)."
+    help = "Entrena Prophet con festivos GT, quincena y clima; guarda predicciones (RF-03/RF-08)."
 
     def handle(self, *args, **options):
         hoy = timezone.localdate()
@@ -72,7 +80,6 @@ class Command(BaseCommand):
                 )
                 continue
 
-            # --- Paso 1: validar el modelo con los últimos 7 días reales ---
             corte = hoy - timedelta(days=7)
             df_entreno = df[df["ds"] < pd.Timestamp(corte)]
             df_real_reciente = df[df["ds"] >= pd.Timestamp(corte)]
@@ -82,17 +89,19 @@ class Command(BaseCommand):
                 modelo_val = construir_modelo()
                 modelo_val.fit(df_entreno)
                 futuro_val = modelo_val.make_future_dataframe(periods=len(df_real_reciente))
-                futuro_val = agregar_quincena_a_futuro(futuro_val)
+                futuro_val = agregar_regresores_a_futuro(futuro_val, usar_pronostico_real=False)
                 pronostico_val = modelo_val.predict(futuro_val).tail(len(df_real_reciente))
                 mape = calcular_mape(
                     df_real_reciente["y"].tolist(), pronostico_val["yhat"].tolist()
                 )
 
-            # --- Paso 2: modelo final con TODO el historial, predice el futuro real ---
             modelo = construir_modelo()
             modelo.fit(df)
             futuro = modelo.make_future_dataframe(periods=7)
-            futuro = agregar_quincena_a_futuro(futuro)
+            # Aquí sí usamos el pronóstico REAL de OpenWeatherMap para los
+            # próximos días - es la única parte de todo el pipeline que
+            # consulta clima real, no sintético.
+            futuro = agregar_regresores_a_futuro(futuro, usar_pronostico_real=True)
             pronostico = modelo.predict(futuro).tail(7)
 
             Prediccion.objects.filter(producto=producto, fecha_prediccion=hoy).delete()
@@ -113,4 +122,6 @@ class Command(BaseCommand):
             mape_txt = f"MAPE={mape}%" if mape is not None else "MAPE=N/D"
             self.stdout.write(self.style.SUCCESS(f"  {producto.nombre}: OK ({mape_txt})"))
 
-        self.stdout.write(self.style.SUCCESS("Entrenamiento completo (con festivos GT y quincena)."))
+        self.stdout.write(self.style.SUCCESS(
+            "Entrenamiento completo (festivos GT, quincena y clima)."
+        ))
