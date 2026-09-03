@@ -197,3 +197,25 @@ def generar_orden_compra(request):
     doc.build(elementos)
     buffer.seek(0)
     return FileResponse(buffer, as_attachment=True, filename=f"orden_compra_{hoy}.pdf")
+
+from .forms import CrearUsuarioForm
+from .models import Usuario
+
+
+@rol_requerido("ADMINISTRADOR")
+def listar_usuarios(request):
+    usuarios = Usuario.objects.all().order_by("nombre")
+    return render(request, "listar_usuarios.html", {"usuarios": usuarios})
+
+
+@rol_requerido("ADMINISTRADOR")
+def crear_usuario(request):
+    if request.method == "POST":
+        form = CrearUsuarioForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Usuario creado correctamente.")
+            return redirect("listar_usuarios")
+    else:
+        form = CrearUsuarioForm()
+    return render(request, "crear_usuario.html", {"form": form})

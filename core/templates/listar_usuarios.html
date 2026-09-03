@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">Usuarios del sistema</h5>
+    <a href="{% url 'crear_usuario' %}" class="btn btn-primary btn-sm">+ Nuevo usuario</a>
+</div>
+<table class="table table-striped bg-white">
+    <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Último acceso</th></tr></thead>
+    <tbody>
+        {% for u in usuarios %}
+        <tr><td>{{ u.nombre }}</td><td>{{ u.correo }}</td><td>{{ u.rol }}</td><td>{{ u.ultimo_acceso|default:"Nunca" }}</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

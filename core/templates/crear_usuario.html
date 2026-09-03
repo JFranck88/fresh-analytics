@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 500px;">
+    <h5 class="mb-3">Crear nuevo usuario</h5>
+    <form method="post">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <div class="mb-3"><label class="form-label">Nombre</label>{{ form.nombre }}</div>
+        <div class="mb-3"><label class="form-label">Correo</label>{{ form.correo }}</div>
+        <div class="mb-3"><label class="form-label">Rol</label>{{ form.rol }}</div>
+        <div class="mb-3"><label class="form-label">Contraseña</label>{{ form.password1 }}</div>
+        <div class="mb-3"><label class="form-label">Confirmar contraseña</label>{{ form.password2 }}</div>
+        <button type="submit" class="btn btn-primary w-100">Crear usuario</button>
+    </form>
+</div>
+{% endblock %}
