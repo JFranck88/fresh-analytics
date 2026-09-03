@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Fresh Analytics{% block titulo %}{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a href="{% url 'dashboard' %}" class="navbar-brand">Fresh Analytics</a>
+            <div class="navbar-nav me-auto">
+                <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
+                <a href="{% url 'listar_predicciones' %}" class="nav-link">Predicciones</a>
+                {% if user.rol == "COMPRADOR" or user.rol == "GERENTE" or user.is_superuser_admin %}
+                    <a href="{% url 'listar_alertas' %}" class="nav-link">Alertas</a>
+                    <a href="{% url 'listar_mermas' %}" class="nav-link">Mermas</a>
+                {% endif %}
+                {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
+                    <a href="{% url 'listar_recomendaciones' %}" class="nav-link">Recomendaciones</a>
+                {% endif %}
+            </div>
+            <span class="text-white-50 small me-3">{{ user.nombre }} · {{ user.rol }}</span>
+            <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">Cerrar sesión</a>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-success">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

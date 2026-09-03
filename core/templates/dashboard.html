@@ -1,73 +1,53 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Fresh Analytics - Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-    <nav class="navbar navbar-dark bg-dark">
-        <div class="container">
-            <span class="navbar-brand">Fresh Analytics</span>
-            <span class="text-white-50 small me-3">{{ usuario.nombre }} · {{ usuario.rol }}</span>
-            <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">Cerrar sesión</a>
-        </div>
-    </nav>
+{% extends "base.html" %}
+{% block titulo %} - Dashboard{% endblock %}
+{% block content %}
 
-    <div class="container mt-4">
-
-        <div class="row g-3 mb-4">
-            <div class="col-6 col-md-3">
-                <div class="card shadow-sm">
-                    <div class="card-body">
-                        <p class="text-muted small mb-1">Ventas de hoy</p>
-                        <p class="fs-4 mb-0">Q {{ ventas_hoy|floatformat:2 }}</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
-                <div class="card shadow-sm">
-                    <div class="card-body">
-                        <p class="text-muted small mb-1">Merma de hoy</p>
-                        <p class="fs-4 mb-0">Q {{ merma_hoy|floatformat:2 }}</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
-                <div class="card shadow-sm border-warning">
-                    <div class="card-body">
-                        <p class="text-muted small mb-1">Por vencer (7 días)</p>
-                        <p class="fs-4 mb-0">{{ por_vencer_semana }} lote(s)</p>
-                    </div>
-                </div>
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <p class="text-muted small mb-1">Ventas de hoy</p>
+                <p class="fs-4 mb-0">Q {{ ventas_hoy|floatformat:2 }}</p>
             </div>
         </div>
-        <a href="{% url 'registrar_merma' %}" class="btn btn-outline-dark btn-sm mb-3">+ Registrar merma</a>
-        <a href="{% url 'listar_mermas' %}" class="btn btn-outline-secondary btn-sm mb-3">Ver historial de mermas</a>
-        <a href="{% url 'listar_alertas' %}" class="btn btn-outline-warning btn-sm mb-3">Ver alertas</a>
-        <a href="{% url 'listar_predicciones' %}" class="btn btn-outline-primary btn-sm mb-3">Ver predicciones</a>
-        <a href="{% url 'listar_recomendaciones' %}" class="btn btn-outline-success btn-sm mb-3">Ver recomendaciones</a>
-        <h6 class="mb-2">Productos próximos a vencer</h6>
-        {% if alertas %}
-            <div class="list-group mb-4">
-                {% for alerta in alertas %}
-                    <div class="list-group-item d-flex align-items-center gap-2">
-                        <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
-                        <span class="flex-grow-1">{{ alerta.producto }} — {{ alerta.cantidad }} unidades</span>
-                        <span class="text-muted small">
-                            {% if alerta.dias_restantes == 0 %}
-                                Vence hoy
-                            {% else %}
-                                Vence en {{ alerta.dias_restantes }} día(s)
-                            {% endif %}
-                        </span>
-                    </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <p class="text-muted">No hay productos próximos a vencer en los próximos 7 días.</p>
-        {% endif %}
-
     </div>
-</body>
-</html>
+    <div class="col-6 col-md-3">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <p class="text-muted small mb-1">Merma de hoy</p>
+                <p class="fs-4 mb-0">Q {{ merma_hoy|floatformat:2 }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card shadow-sm border-warning">
+            <div class="card-body">
+                <p class="text-muted small mb-1">Por vencer (7 días)</p>
+                <p class="fs-4 mb-0">{{ por_vencer_semana }} lote(s)</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
+    <a href="{% url 'registrar_merma' %}" class="btn btn-outline-dark btn-sm mb-3">+ Registrar merma</a>
+{% endif %}
+
+<h6 class="mb-2">Productos próximos a vencer</h6>
+{% if alertas %}
+    <div class="list-group mb-4">
+        {% for alerta in alertas %}
+            <div class="list-group-item d-flex align-items-center gap-2">
+                <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
+                <span class="flex-grow-1">{{ alerta.producto }} — {{ alerta.cantidad }} unidades</span>
+                <span class="text-muted small">
+                    {% if alerta.dias_restantes == 0 %}Vence hoy{% else %}Vence en {{ alerta.dias_restantes }} día(s){% endif %}
+                </span>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <p class="text-muted">No hay productos próximos a vencer en los próximos 7 días.</p>
+{% endif %}
+
+{% endblock %}

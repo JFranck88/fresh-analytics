@@ -1,52 +1,15 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Fresh Analytics - Registrar Merma</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-    <nav class="navbar navbar-dark bg-dark">
-        <div class="container">
-            <a href="{% url 'dashboard' %}" class="navbar-brand">Fresh Analytics</a>
-            <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">Cerrar sesión</a>
-        </div>
-    </nav>
-
-    <div class="container mt-4" style="max-width: 500px;">
-        <a href="{% url 'dashboard' %}" class="text-decoration-none">&larr; Volver al dashboard</a>
-        <h5 class="mt-3 mb-3">Registrar merma</h5>
-
-        {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-success">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-
-        <form method="post">
-            {% csrf_token %}
-            <div class="mb-3">
-                <label class="form-label">Producto</label>
-                {{ form.producto }}
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Fecha</label>
-                {{ form.fecha }}
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Cantidad</label>
-                {{ form.cantidad }}
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Motivo</label>
-                {{ form.motivo }}
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Costo de la pérdida (Q)</label>
-                {{ form.costo_perdida }}
-            </div>
-            <button type="submit" class="btn btn-primary w-100">Registrar merma</button>
-        </form>
-    </div>
-</body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 500px;">
+    <h5 class="mb-3">Registrar merma</h5>
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3"><label class="form-label">Producto</label>{{ form.producto }}</div>
+        <div class="mb-3"><label class="form-label">Fecha</label>{{ form.fecha }}</div>
+        <div class="mb-3"><label class="form-label">Cantidad</label>{{ form.cantidad }}</div>
+        <div class="mb-3"><label class="form-label">Motivo</label>{{ form.motivo }}</div>
+        <div class="mb-3"><label class="form-label">Costo de la pérdida (Q)</label>{{ form.costo_perdida }}</div>
+        <button type="submit" class="btn btn-primary w-100">Registrar merma</button>
+    </form>
+</div>
+{% endblock %}
