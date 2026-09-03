@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-0cgi9fn&70v5(jb8%s9j56!^og!qa=2)tf=wb0t+mc%6ptfx9l'
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-solo-para-desarrollo-local')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=False, cast=bool)
@@ -81,16 +81,21 @@ WSGI_APPLICATION = 'fresh_analytics_project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-DATABASES = {
-    "default": dj_database_url.config(
-        default=(
-            f"postgresql://{config('DB_USER')}:{config('DB_PASSWORD')}"
-            f"@{config('DB_HOST', default='localhost')}:{config('DB_PORT', default='5432')}"
-            f"/{config('DB_NAME')}"
-        ),
-        conn_max_age=600,
-    )
-}
+if config("DATABASE_URL", default=None):
+    DATABASES = {
+        "default": dj_database_url.config(conn_max_age=600)
+    }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": config("DB_NAME"),
+            "USER": config("DB_USER"),
+            "PASSWORD": config("DB_PASSWORD"),
+            "HOST": config("DB_HOST", default="localhost"),
+            "PORT": config("DB_PORT", default="5432"),
+        }
+    }
 
 
 # Password validation
