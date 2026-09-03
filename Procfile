@@ -1,0 +1,1 @@
+web: gunicorn fresh_analytics_project.wsgi --log-file -
