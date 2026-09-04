@@ -30,7 +30,7 @@ class Command(BaseCommand):
 
         # Regenerar las alertas de hoy - evita duplicados si el comando
         # corre más de una vez en el mismo día.
-        Alerta.objects.filter(fecha_generacion__date=hoy).delete()
+        Alerta.objects.all().delete()
 
         nuevas = []
         for producto in Producto.objects.filter(activo=True):
