@@ -3,6 +3,16 @@
 {% block content %}
 <h5 class="mb-1">Predicción de ventas - próximos 7 días</h5>
 <p class="text-muted small">Corrida del modelo: {{ fecha_corrida }}</p>
+{% if mensajes_contexto %}
+    <div class="mb-3">
+        {% for m in mensajes_contexto %}
+            <div class="alert alert-light border d-flex align-items-center gap-2 mb-2 py-2">
+                <span style="font-size: 1.2rem;">{{ m.icono }}</span>
+                <span>{{ m.texto }}</span>
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
 
 <div class="mb-4">
     <div class="d-flex justify-content-between align-items-center mb-2">
@@ -64,7 +74,13 @@
             options: {
                 responsive: true,
                 plugins: { legend: { display: true, position: 'bottom' } },
-                scales: { y: { beginAtZero: true } },
+                
+                                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Unidades de venta esperadas' },
+                    }
+                },
             }
         });
     }

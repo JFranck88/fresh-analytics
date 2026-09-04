@@ -1,5 +1,5 @@
-import json
 import io
+import json
 from datetime import timedelta
 
 from django.contrib import messages
@@ -36,6 +36,7 @@ def obtener_parametro(clave, default):
     except Configuracion.DoesNotExist:
         return default
 
+
 def obtener_validacion_cruzada():
     try:
         raw = Configuracion.objects.get(clave="validacion_cruzada_resultado").valor
@@ -43,11 +44,8 @@ def obtener_validacion_cruzada():
     except (Configuracion.DoesNotExist, json.JSONDecodeError):
         return None
 
+
 def construir_contexto_inteligente(hoy):
-    """Genera los mensajes del banner de contexto: quincena y clima
-    próximo, usando exactamente los mismos factores que ya considera
-    Prophet (RF-08) - no es adorno, es lo que el modelo ya sabe, hecho
-    visible en lenguaje humano."""
     mensajes = []
 
     if hoy.day in DIAS_QUINCENA:
@@ -70,7 +68,7 @@ def construir_contexto_inteligente(hoy):
                     "- posible baja en la venta de frutas y verduras frescas."
                 ),
             })
-            break  # un solo aviso de lluvia es suficiente, no saturar
+            break
 
     return mensajes
 
@@ -179,6 +177,8 @@ def listar_mermas(request):
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
 def listar_predicciones(request):
     hoy = timezone.localdate()
+    mensajes_contexto = construir_contexto_inteligente(hoy)
+
     fecha_max = Prediccion.objects.order_by("-fecha_prediccion").values_list(
         "fecha_prediccion", flat=True
     ).first()
@@ -208,9 +208,9 @@ def listar_predicciones(request):
         "modelo_al_dia": dias_desde_prediccion == 0,
         "datos_grafica_json": json.dumps(datos_grafica),
         "validacion_json": json.dumps(validacion_cruzada) if validacion_cruzada else None,
+        "mensajes_contexto": mensajes_contexto,
     })
 
-     
 
 @rol_requerido("COMPRADOR")
 def listar_recomendaciones(request):
