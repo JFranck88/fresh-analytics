@@ -3,6 +3,7 @@
 {% block content %}
 <h5 class="mb-1">Predicción de ventas - próximos 7 días</h5>
 <p class="text-muted small">Corrida del modelo: {{ fecha_corrida }}</p>
+
 <div class="mb-4">
     <div class="d-flex justify-content-between align-items-center mb-2">
         <h6 class="mb-0">Tendencia de predicción por producto</h6>
@@ -22,12 +23,12 @@
         selector.appendChild(opt);
     });
 
-    let chart;
+    let chartTendencia;
     function dibujar(nombre) {
         const datos = datosGrafica[nombre];
-        if (chart) chart.destroy();
+        if (chartTendencia) chartTendencia.destroy();
         const ctx = document.getElementById('grafica-prediccion').getContext('2d');
-        chart = new Chart(ctx, {
+        chartTendencia = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: datos.labels,
@@ -72,6 +73,7 @@
     const primerProducto = Object.keys(datosGrafica)[0];
     if (primerProducto) dibujar(primerProducto);
 </script>
+
 <table class="table table-striped bg-white">
     <thead><tr><th>Producto</th><th>Fecha</th><th>Predicho</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
     <tbody>
@@ -82,12 +84,76 @@
         {% endfor %}
     </tbody>
 </table>
+
 <hr class="my-4">
 
-<h6 class="mb-2">Respaldo estadístico del modelo</h6>
-<p class="text-muted small">
-    Esta gráfica no es una sola prueba: valida el modelo con múltiples
-    periodos históricos distintos, no solo el más reciente.
-</p>
-<img src="{% static 'core/img/resumen_precision.png' %}" class="img-fluid border rounded" alt="Precisión del modelo Fresh Analytics">
+{% if validacion_json %}
+<h6 class="mb-1">Respaldo estadístico del modelo</h6>
+<p class="text-muted small">Validado con múltiples periodos históricos, no una sola prueba.</p>
+<canvas id="grafica-validacion" height="90"></canvas>
+<p id="meta-validacion" class="text-muted small mt-2"></p>
+
+<script>
+    const validacion = {{ validacion_json|safe }};
+    const META = 25;
+
+    const numerosEncimaDeBarras = {
+        id: 'numerosEncimaDeBarras',
+        afterDatasetsDraw(chart) {
+            const { ctx } = chart;
+            chart.data.datasets[0].data.forEach((valor, i) => {
+                const barra = chart.getDatasetMeta(0).data[i];
+                ctx.save();
+                ctx.fillStyle = '#212529';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(valor.toFixed(1) + '%', barra.x, barra.y - 8);
+                ctx.restore();
+            });
+        }
+    };
+
+    new Chart(document.getElementById('grafica-validacion').getContext('2d'), {
+        data: {
+            labels: validacion.dias.map(d => `Día ${d}`),
+            datasets: [
+                {
+                    type: 'bar',
+                    label: 'Error promedio del modelo',
+                    data: validacion.mape,
+                    backgroundColor: validacion.mape.map(v => v <= META ? '#2e7d32' : '#c62828'),
+                },
+                {
+                    type: 'line',
+                    label: `Meta del proyecto (${META}% máximo)`,
+                    data: validacion.dias.map(() => META),
+                    borderColor: '#c62828',
+                    borderDash: [6, 4],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                }
+            ]
+        },
+        options: {
+            plugins: { legend: { display: true, position: 'bottom' } },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    suggestedMax: META + 10,
+                    title: { display: true, text: 'Error promedio del modelo (%)' },
+                },
+                x: {
+                    title: { display: true, text: 'Días de anticipación de la predicción' },
+                }
+            }
+        },
+        plugins: [numerosEncimaDeBarras]
+    });
+
+    document.getElementById('meta-validacion').textContent =
+        `Validado con ${validacion.productos} producto(s) · Última corrida: ${validacion.fecha}`;
+</script>
+{% else %}
+<p class="text-muted small">Aún no se ha ejecutado una validación cruzada. Corre <code>python manage.py auditar_modelo</code> para generar este respaldo.</p>
+{% endif %}
 {% endblock %}

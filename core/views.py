@@ -36,6 +36,12 @@ def obtener_parametro(clave, default):
     except Configuracion.DoesNotExist:
         return default
 
+def obtener_validacion_cruzada():
+    try:
+        raw = Configuracion.objects.get(clave="validacion_cruzada_resultado").valor
+        return json.loads(raw)
+    except (Configuracion.DoesNotExist, json.JSONDecodeError):
+        return None
 
 def construir_contexto_inteligente(hoy):
     """Genera los mensajes del banner de contexto: quincena y clima
@@ -194,14 +200,17 @@ def listar_predicciones(request):
         datos_grafica[p.producto.nombre]["superior"].append(float(p.intervalo_superior))
 
     dias_desde_prediccion = (hoy - fecha_max).days if fecha_max else None
+    validacion_cruzada = obtener_validacion_cruzada()
 
     return render(request, "listar_predicciones.html", {
         "predicciones": predicciones,
         "fecha_corrida": fecha_max,
         "modelo_al_dia": dias_desde_prediccion == 0,
         "datos_grafica_json": json.dumps(datos_grafica),
+        "validacion_json": json.dumps(validacion_cruzada) if validacion_cruzada else None,
     })
 
+     
 
 @rol_requerido("COMPRADOR")
 def listar_recomendaciones(request):
