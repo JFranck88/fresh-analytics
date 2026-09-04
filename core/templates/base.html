@@ -15,6 +15,7 @@
                 {% if user.rol == "COMPRADOR" or user.rol == "GERENTE" or user.is_superuser_admin %}
                     <a href="{% url 'listar_alertas' %}" class="nav-link">Alertas</a>
                     <a href="{% url 'listar_mermas' %}" class="nav-link">Mermas</a>
+                    <a href="{% url 'mantenimiento' %}" class="nav-link">Mantenimiento</a>
                 {% endif %}
                 {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
                     <a href="{% url 'listar_recomendaciones' %}" class="nav-link">Recomendaciones</a>

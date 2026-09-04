@@ -249,3 +249,36 @@ def listar_configuracion(request):
         request, "listar_configuracion.html",
         {"form": form, "configuraciones": configuraciones},
     )
+@rol_requerido("ADMINISTRADOR")
+def mantenimiento(request):
+    hoy = timezone.localdate()
+
+    fecha_prediccion_max = Prediccion.objects.order_by(
+        "-fecha_prediccion"
+    ).values_list("fecha_prediccion", flat=True).first()
+    dias_desde_prediccion = (hoy - fecha_prediccion_max).days if fecha_prediccion_max else None
+
+    fecha_alerta_max = Alerta.objects.order_by(
+        "-fecha_generacion"
+    ).values_list("fecha_generacion", flat=True).first()
+
+    productos_con_mape_alto = (
+        Prediccion.objects.filter(fecha_prediccion=fecha_prediccion_max, precision_modelo__gt=25)
+        .select_related("producto")
+        .values_list("producto__nombre", "precision_modelo")
+        .distinct()
+    )
+
+    contexto = {
+        "hoy": hoy,
+        "fecha_prediccion_max": fecha_prediccion_max,
+        "dias_desde_prediccion": dias_desde_prediccion,
+        "prediccion_desactualizada": dias_desde_prediccion is not None and dias_desde_prediccion >= 2,
+        "fecha_alerta_max": fecha_alerta_max,
+        "total_productos": Producto.objects.filter(activo=True).count(),
+        "total_ventas": Venta.objects.count(),
+        "total_predicciones": Prediccion.objects.count(),
+        "alertas_activas": Alerta.objects.filter(leida=False).count(),
+        "productos_con_mape_alto": productos_con_mape_alto,
+    }
+    return render(request, "mantenimiento.html", contexto)

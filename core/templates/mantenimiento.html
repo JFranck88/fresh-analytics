@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h5 class="mb-3">Mantenimiento - Estado del sistema</h5>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card shadow-sm {% if prediccion_desactualizada %}border-danger{% else %}border-success{% endif %}">
+            <div class="card-body">
+                <p class="text-muted small mb-1">Última corrida de Prophet</p>
+                <p class="fs-5 mb-0">{{ fecha_prediccion_max|default:"Nunca" }}</p>
+                {% if prediccion_desactualizada %}
+                    <p class="text-danger small mb-0">Desactualizada ({{ dias_desde_prediccion }} día(s)) - revisar GitHub Actions</p>
+                {% else %}
+                    <p class="text-success small mb-0">Al día</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <p class="text-muted small mb-1">Última generación de alertas</p>
+                <p class="fs-5 mb-0">{{ fecha_alerta_max|date:"d/m/Y H:i"|default:"Nunca" }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <p class="text-muted small mb-1">Alertas activas sin leer</p>
+                <p class="fs-5 mb-0">{{ alertas_activas }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h6 class="mb-2">Volumen de datos</h6>
+<table class="table table-sm bg-white mb-4">
+    <tbody>
+        <tr><td>Productos activos</td><td><strong>{{ total_productos }}</strong></td></tr>
+        <tr><td>Ventas históricas registradas</td><td><strong>{{ total_ventas }}</strong></td></tr>
+        <tr><td>Predicciones almacenadas</td><td><strong>{{ total_predicciones }}</strong></td></tr>
+    </tbody>
+</table>
+
+<h6 class="mb-2">Productos que podrían necesitar recalibración</h6>
+<p class="text-muted small">Modelos con MAPE mayor al 25% (meta del marco metodológico) - considerar más historial o revisar datos atípicos.</p>
+{% if productos_con_mape_alto %}
+    <table class="table table-sm bg-white">
+        <thead><tr><th>Producto</th><th>MAPE</th></tr></thead>
+        <tbody>
+            {% for nombre, mape in productos_con_mape_alto %}
+            <tr><td>{{ nombre }}</td><td class="text-danger">{{ mape }}%</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p class="text-success">Ningún producto supera el umbral - todos los modelos están dentro de la meta.</p>
+{% endif %}
+
+<div class="alert alert-secondary small mt-4">
+    Para forzar un reentrenamiento manual, ve a la pestaña "Actions" del
+    repositorio en GitHub y ejecuta "Entrenamiento diario Fresh Analytics"
+    con el botón "Run workflow".
+</div>
+{% endblock %}
