@@ -2,6 +2,25 @@
 {% block titulo %} - Dashboard{% endblock %}
 {% block content %}
 
+<div class="d-flex align-items-center gap-2 mb-3">
+    {% if modelo_al_dia %}
+        <span class="badge bg-success">● Modelo actualizado hoy</span>
+    {% else %}
+        <span class="badge bg-warning text-dark">● Última actualización hace {{ dias_desde_prediccion }} día(s)</span>
+    {% endif %}
+</div>
+
+{% if mensajes_contexto %}
+    <div class="mb-4">
+        {% for m in mensajes_contexto %}
+            <div class="alert alert-light border d-flex align-items-center gap-2 mb-2 py-2">
+                <span style="font-size: 1.3rem;">{{ m.icono }}</span>
+                <span>{{ m.texto }}</span>
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">
         <div class="card shadow-sm">

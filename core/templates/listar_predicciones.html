@@ -1,7 +1,77 @@
 {% extends "base.html" %}
+{% load static %}
 {% block content %}
 <h5 class="mb-1">Predicción de ventas - próximos 7 días</h5>
 <p class="text-muted small">Corrida del modelo: {{ fecha_corrida }}</p>
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Tendencia de predicción por producto</h6>
+        <select id="selector-producto" class="form-select form-select-sm" style="width: auto;"></select>
+    </div>
+    <canvas id="grafica-prediccion" height="90"></canvas>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+    const datosGrafica = {{ datos_grafica_json|safe }};
+    const selector = document.getElementById('selector-producto');
+    Object.keys(datosGrafica).forEach(nombre => {
+        const opt = document.createElement('option');
+        opt.value = nombre;
+        opt.textContent = nombre;
+        selector.appendChild(opt);
+    });
+
+    let chart;
+    function dibujar(nombre) {
+        const datos = datosGrafica[nombre];
+        if (chart) chart.destroy();
+        const ctx = document.getElementById('grafica-prediccion').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: datos.labels,
+                datasets: [
+                    {
+                        label: 'Límite superior (80% confianza)',
+                        data: datos.superior,
+                        borderColor: 'rgba(13,110,253,0.15)',
+                        backgroundColor: 'rgba(13,110,253,0.12)',
+                        fill: '+1',
+                        pointRadius: 0,
+                        borderWidth: 1,
+                    },
+                    {
+                        label: 'Límite inferior',
+                        data: datos.inferior,
+                        borderColor: 'rgba(13,110,253,0.15)',
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        fill: false,
+                    },
+                    {
+                        label: 'Predicho',
+                        data: datos.predicho,
+                        borderColor: '#0d6efd',
+                        backgroundColor: '#0d6efd',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 3,
+                    },
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: true, position: 'bottom' } },
+                scales: { y: { beginAtZero: true } },
+            }
+        });
+    }
+
+    selector.addEventListener('change', (e) => dibujar(e.target.value));
+    const primerProducto = Object.keys(datosGrafica)[0];
+    if (primerProducto) dibujar(primerProducto);
+</script>
 <table class="table table-striped bg-white">
     <thead><tr><th>Producto</th><th>Fecha</th><th>Predicho</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
     <tbody>
@@ -12,4 +82,12 @@
         {% endfor %}
     </tbody>
 </table>
+<hr class="my-4">
+
+<h6 class="mb-2">Respaldo estadístico del modelo</h6>
+<p class="text-muted small">
+    Esta gráfica no es una sola prueba: valida el modelo con múltiples
+    periodos históricos distintos, no solo el más reciente.
+</p>
+<img src="{% static 'core/img/resumen_precision.png' %}" class="img-fluid border rounded" alt="Precisión del modelo Fresh Analytics">
 {% endblock %}

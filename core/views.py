@@ -1,3 +1,4 @@
+import json
 import io
 from datetime import timedelta
 
@@ -14,6 +15,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from .decorators import rol_requerido
 from .forms import MermaForm, CrearUsuarioForm, ConfiguracionForm
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta
+from .clima import pronostico_lluvia_real
 
 NIVEL_POR_TIPO = {
     "VENCIMIENTO": "danger",
@@ -21,12 +23,50 @@ NIVEL_POR_TIPO = {
     "EXCEDENTE": "success",
 }
 
+DIAS_QUINCENA = [14, 15, 16, 29, 30, 31, 1]
+
+DIAS_SEMANA_ES = [
+    "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
+]
+
 
 def obtener_parametro(clave, default):
     try:
         return Configuracion.objects.get(clave=clave).valor
     except Configuracion.DoesNotExist:
         return default
+
+
+def construir_contexto_inteligente(hoy):
+    """Genera los mensajes del banner de contexto: quincena y clima
+    próximo, usando exactamente los mismos factores que ya considera
+    Prophet (RF-08) - no es adorno, es lo que el modelo ya sabe, hecho
+    visible en lenguaje humano."""
+    mensajes = []
+
+    if hoy.day in DIAS_QUINCENA:
+        mensajes.append({
+            "icono": "📅",
+            "texto": "Estamos en periodo de quincena - el modelo ya ajustó "
+                     "sus predicciones esperando mayor demanda.",
+        })
+
+    pronostico = pronostico_lluvia_real()
+    for fecha, prob in sorted(pronostico.items()):
+        if fecha < hoy or fecha > hoy + timedelta(days=4):
+            continue
+        if prob >= 0.4:
+            nombre_dia = DIAS_SEMANA_ES[fecha.weekday()]
+            mensajes.append({
+                "icono": "🌧️",
+                "texto": (
+                    f"Se pronostica lluvia el {nombre_dia} ({fecha.strftime('%d/%m')}) "
+                    "- posible baja en la venta de frutas y verduras frescas."
+                ),
+            })
+            break  # un solo aviso de lluvia es suficiente, no saturar
+
+    return mensajes
 
 
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
@@ -60,12 +100,22 @@ def dashboard(request):
         for a in alertas_qs
     ]
 
+    fecha_prediccion_max = Prediccion.objects.order_by(
+        "-fecha_prediccion"
+    ).values_list("fecha_prediccion", flat=True).first()
+    dias_desde_prediccion = (hoy - fecha_prediccion_max).days if fecha_prediccion_max else None
+    modelo_al_dia = dias_desde_prediccion is not None and dias_desde_prediccion == 0
+
     contexto = {
         "usuario": request.user,
         "ventas_hoy": ventas_hoy,
         "merma_hoy": merma_hoy,
         "por_vencer_semana": sum(1 for a in alertas if a["tipo"] == "Vencimiento"),
         "alertas": alertas,
+        "mensajes_contexto": construir_contexto_inteligente(hoy),
+        "modelo_al_dia": modelo_al_dia,
+        "dias_desde_prediccion": dias_desde_prediccion,
+        "fecha_prediccion_max": fecha_prediccion_max,
     }
     return render(request, "dashboard.html", contexto)
 
@@ -122,6 +172,7 @@ def listar_mermas(request):
 
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
 def listar_predicciones(request):
+    hoy = timezone.localdate()
     fecha_max = Prediccion.objects.order_by("-fecha_prediccion").values_list(
         "fecha_prediccion", flat=True
     ).first()
@@ -132,10 +183,24 @@ def listar_predicciones(request):
         .order_by("producto__nombre", "fecha_pronosticada")
     )
 
-    return render(
-        request, "listar_predicciones.html",
-        {"predicciones": predicciones, "fecha_corrida": fecha_max},
-    )
+    datos_grafica = {}
+    for p in predicciones:
+        datos_grafica.setdefault(
+            p.producto.nombre, {"labels": [], "predicho": [], "inferior": [], "superior": []}
+        )
+        datos_grafica[p.producto.nombre]["labels"].append(p.fecha_pronosticada.strftime("%d/%m"))
+        datos_grafica[p.producto.nombre]["predicho"].append(float(p.valor_predicho))
+        datos_grafica[p.producto.nombre]["inferior"].append(float(p.intervalo_inferior))
+        datos_grafica[p.producto.nombre]["superior"].append(float(p.intervalo_superior))
+
+    dias_desde_prediccion = (hoy - fecha_max).days if fecha_max else None
+
+    return render(request, "listar_predicciones.html", {
+        "predicciones": predicciones,
+        "fecha_corrida": fecha_max,
+        "modelo_al_dia": dias_desde_prediccion == 0,
+        "datos_grafica_json": json.dumps(datos_grafica),
+    })
 
 
 @rol_requerido("COMPRADOR")
@@ -249,6 +314,8 @@ def listar_configuracion(request):
         request, "listar_configuracion.html",
         {"form": form, "configuraciones": configuraciones},
     )
+
+
 @rol_requerido("ADMINISTRADOR")
 def mantenimiento(request):
     hoy = timezone.localdate()
