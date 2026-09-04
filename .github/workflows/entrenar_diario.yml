@@ -1,0 +1,34 @@
+name: Entrenamiento diario Fresh Analytics
+
+on:
+  schedule:
+    # 12:00 UTC = 6:00 AM en Guatemala (UTC-6), tal como pide RNF-04
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+    # Permite correrlo manualmente desde la pestaña "Actions" de GitHub,
+    # útil para probar sin esperar hasta el día siguiente.
+
+jobs:
+  entrenar:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalar dependencias (incluye Prophet)
+        run: pip install -r requirements.txt
+
+      - name: Entrenar modelo Prophet (RF-03)
+        run: python manage.py entrenar_modelo
+
+      - name: Generar alertas (RF-05 / DFD P-07)
+        run: python manage.py generar_alertas

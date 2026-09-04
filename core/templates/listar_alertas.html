@@ -6,8 +6,13 @@
         {% for alerta in alertas %}
             <div class="list-group-item d-flex align-items-center gap-2">
                 <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
-                <span class="flex-grow-1">{{ alerta.producto }} — {{ alerta.cantidad }} unidades</span>
-                <span class="text-muted small">{% if alerta.dias_restantes == 0 %}Vence hoy{% else %}Vence en {{ alerta.dias_restantes }} día(s){% endif %}</span>
+                <span class="flex-grow-1">
+                    <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
+                    <span class="text-muted small d-block">{{ alerta.tipo }}</span>
+                </span>
+                <a href="{% url 'marcar_alerta_leida' alerta.id %}" class="btn btn-outline-secondary btn-sm">
+                    Marcar como leída
+                </a>
             </div>
         {% endfor %}
     </div>

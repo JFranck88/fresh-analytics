@@ -33,21 +33,21 @@
     <a href="{% url 'registrar_merma' %}" class="btn btn-outline-dark btn-sm mb-3">+ Registrar merma</a>
 {% endif %}
 
-<h6 class="mb-2">Productos próximos a vencer</h6>
+<h6 class="mb-2">Alertas activas</h6>
 {% if alertas %}
     <div class="list-group mb-4">
         {% for alerta in alertas %}
             <div class="list-group-item d-flex align-items-center gap-2">
                 <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
-                <span class="flex-grow-1">{{ alerta.producto }} — {{ alerta.cantidad }} unidades</span>
-                <span class="text-muted small">
-                    {% if alerta.dias_restantes == 0 %}Vence hoy{% else %}Vence en {{ alerta.dias_restantes }} día(s){% endif %}
+                <span class="flex-grow-1">
+                    <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
                 </span>
+                <span class="text-muted small">{{ alerta.tipo }}</span>
             </div>
         {% endfor %}
     </div>
 {% else %}
-    <p class="text-muted">No hay productos próximos a vencer en los próximos 7 días.</p>
+    <p class="text-muted">No hay alertas activas en este momento.</p>
 {% endif %}
 
 {% endblock %}

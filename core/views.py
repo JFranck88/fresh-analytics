@@ -4,7 +4,7 @@ from datetime import timedelta
 from django.contrib import messages
 from django.db.models import Sum, F, DecimalField
 from django.http import FileResponse
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -13,13 +13,16 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 
 from .decorators import rol_requerido
 from .forms import MermaForm, CrearUsuarioForm, ConfiguracionForm
-from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion
+from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta
+
+NIVEL_POR_TIPO = {
+    "VENCIMIENTO": "danger",
+    "STOCK_BAJO": "warning",
+    "EXCEDENTE": "success",
+}
 
 
 def obtener_parametro(clave, default):
-    """Lee un valor desde la tabla Configuracion; si no existe, usa el
-    default. Así el Administrador puede ajustar umbrales de negocio
-    sin que un desarrollador tenga que tocar el código (RF Figura 20)."""
     try:
         return Configuracion.objects.get(clave=clave).valor
     except Configuracion.DoesNotExist:
@@ -41,34 +44,61 @@ def dashboard(request):
         total=Sum("costo_perdida")
     )["total"] or 0
 
-    dias_umbral_rojo = int(obtener_parametro("dias_alerta_vencimiento", 3))
-    limite = hoy + timedelta(days=7)
-    lotes_por_vencer = (
-        Inventario.objects.filter(
-            fecha_vencimiento__gte=hoy, fecha_vencimiento__lte=limite
-        )
+    alertas_qs = (
+        Alerta.objects.filter(leida=False)
         .select_related("producto")
-        .order_by("fecha_vencimiento")
+        .order_by("tipo", "producto__nombre")
     )
-
-    alertas = []
-    for lote in lotes_por_vencer:
-        dias_restantes = (lote.fecha_vencimiento - hoy).days
-        alertas.append({
-            "producto": lote.producto.nombre,
-            "dias_restantes": dias_restantes,
-            "cantidad": lote.cantidad,
-            "nivel": "danger" if dias_restantes <= dias_umbral_rojo else "warning",
-        })
+    alertas = [
+        {
+            "id": a.id_alerta,
+            "producto": a.producto.nombre,
+            "mensaje": a.mensaje,
+            "nivel": NIVEL_POR_TIPO.get(a.tipo, "secondary"),
+            "tipo": a.get_tipo_display(),
+        }
+        for a in alertas_qs
+    ]
 
     contexto = {
         "usuario": request.user,
         "ventas_hoy": ventas_hoy,
         "merma_hoy": merma_hoy,
-        "por_vencer_semana": len(alertas),
+        "por_vencer_semana": sum(1 for a in alertas if a["tipo"] == "Vencimiento"),
         "alertas": alertas,
     }
     return render(request, "dashboard.html", contexto)
+
+
+@rol_requerido("GERENTE", "COMPRADOR")
+def listar_alertas(request):
+    alertas_qs = (
+        Alerta.objects.filter(leida=False)
+        .select_related("producto")
+        .order_by("tipo", "producto__nombre")
+    )
+    alertas = [
+        {
+            "id": a.id_alerta,
+            "producto": a.producto.nombre,
+            "mensaje": a.mensaje,
+            "nivel": NIVEL_POR_TIPO.get(a.tipo, "secondary"),
+            "tipo": a.get_tipo_display(),
+        }
+        for a in alertas_qs
+    ]
+    return render(request, "listar_alertas.html", {"alertas": alertas})
+
+
+@rol_requerido("GERENTE", "COMPRADOR")
+def marcar_alerta_leida(request, alerta_id):
+    alerta = get_object_or_404(Alerta, id_alerta=alerta_id)
+    alerta.leida = True
+    alerta.usuario_lector = request.user
+    alerta.fecha_lectura = timezone.now()
+    alerta.save()
+    messages.success(request, "Alerta marcada como leída.")
+    return redirect("listar_alertas")
 
 
 @rol_requerido("COMPRADOR")
@@ -88,32 +118,6 @@ def registrar_merma(request):
 def listar_mermas(request):
     mermas = Merma.objects.select_related("producto").order_by("-fecha")[:100]
     return render(request, "listar_mermas.html", {"mermas": mermas})
-
-
-@rol_requerido("GERENTE", "COMPRADOR")
-def listar_alertas(request):
-    hoy = timezone.localdate()
-    dias_umbral_rojo = int(obtener_parametro("dias_alerta_vencimiento", 3))
-    limite = hoy + timedelta(days=7)
-    lotes = (
-        Inventario.objects.filter(
-            fecha_vencimiento__gte=hoy, fecha_vencimiento__lte=limite
-        )
-        .select_related("producto")
-        .order_by("fecha_vencimiento")
-    )
-
-    alertas = []
-    for lote in lotes:
-        dias_restantes = (lote.fecha_vencimiento - hoy).days
-        alertas.append({
-            "producto": lote.producto.nombre,
-            "dias_restantes": dias_restantes,
-            "cantidad": lote.cantidad,
-            "nivel": "danger" if dias_restantes <= dias_umbral_rojo else "warning",
-        })
-
-    return render(request, "listar_alertas.html", {"alertas": alertas})
 
 
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
