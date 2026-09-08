@@ -25,12 +25,12 @@
                 <div class="navbar-nav me-auto d-flex flex-column flex-lg-row align-items-start align-items-lg-center">
                     <a href="{% url 'dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}activo{% endif %}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
                     <a href="{% url 'listar_predicciones' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_predicciones' %}activo{% endif %}"><i class="bi bi-graph-up-arrow me-1"></i>Predicciones</a>
+                                        {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
+                        <a href="{% url 'listar_recomendaciones' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_recomendaciones' %}activo{% endif %}"><i class="bi bi-cart-check me-1"></i>Recomendaciones</a>
+                    {% endif %}
                     {% if user.rol == "COMPRADOR" or user.rol == "GERENTE" or user.is_superuser_admin %}
                         <a href="{% url 'listar_alertas' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_alertas' %}activo{% endif %}"><i class="bi bi-bell me-1"></i>Alertas</a>
                         <a href="{% url 'listar_mermas' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_mermas' %}activo{% endif %}"><i class="bi bi-recycle me-1"></i>Mermas</a>
-                    {% endif %}
-                    {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
-                        <a href="{% url 'listar_recomendaciones' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_recomendaciones' %}activo{% endif %}"><i class="bi bi-cart-check me-1"></i>Recomendaciones</a>
                     {% endif %}
                     {% if user.rol == "ADMINISTRADOR" or user.is_superuser_admin %}
                         <div class="nav-divisor d-none d-lg-block"></div>
@@ -67,7 +67,7 @@
 
     <footer class="text-center text-muted small py-4 mt-5" style="border-top: 1px solid rgba(27,67,50,0.1);">
         <img src="{% static 'core/img/logo.svg' %}" alt="" style="width: 16px; height: 16px; opacity: 0.6; vertical-align: -2px; margin-right: 4px;">
-        Fresh Analytics — Sistema de soporte a la decisión para perecederos
+        Fresh Analytics — Sistema de Soporte para Decisión - Alimentos Frescos
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
