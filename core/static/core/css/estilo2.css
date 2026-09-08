@@ -198,3 +198,11 @@ a:hover {
 ::-webkit-scrollbar-track {
     background-color: var(--lino);
 }
+
+.navbar-fresh {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.modal-header {
+    background-color: rgba(82, 183, 136, 0.08);
+}

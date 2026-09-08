@@ -2,10 +2,9 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-1">
     <h5 class="mb-0"><i class="bi bi-cart-check me-2"></i>Recomendación de pedidos</h5>
-    <a href="{% url 'generar_orden_compra' %}" class="btn btn-primary btn-sm">Generar orden de compra (PDF)</a>
+    <a href="{% url 'generar_orden_compra' %}" class="btn btn-primary btn-sm"><i class="bi bi-file-earmark-pdf me-1"></i>Generar orden de compra (PDF)</a>
 </div>
-<p class="text-muted small">Predicción 7 días - Stock actual = Cantidad sugerida</p>
-<div class="card">
+<p class="text-muted small mt-2"><i class="bi bi-info-circle me-1"></i>El ajuste manual todavía no se guarda - pendiente de decisión de diseño.</p>
     <div class="card-body p-0">
         <table class="table table-striped mb-0">
             <thead><tr><th>Producto</th><th>Predicción 7 días</th><th>Stock actual</th><th>Sugerido</th><th>Ajustar</th></tr></thead>
