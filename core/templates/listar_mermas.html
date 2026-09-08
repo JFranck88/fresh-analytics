@@ -6,14 +6,18 @@
         <a href="{% url 'registrar_merma' %}" class="btn btn-primary btn-sm">+ Registrar merma</a>
     {% endif %}
 </div>
-<table class="table table-striped bg-white">
-    <thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Motivo</th><th>Costo pérdida</th></tr></thead>
-    <tbody>
-        {% for merma in mermas %}
-        <tr><td>{{ merma.fecha }}</td><td>{{ merma.producto.nombre }}</td><td>{{ merma.cantidad }}</td><td>{{ merma.get_motivo_display }}</td><td>Q {{ merma.costo_perdida }}</td></tr>
-        {% empty %}
-        <tr><td colspan="5" class="text-center text-muted">Sin mermas registradas todavía.</td></tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Motivo</th><th>Costo pérdida</th></tr></thead>
+            <tbody>
+                {% for merma in mermas %}
+                <tr><td>{{ merma.fecha }}</td><td>{{ merma.producto.nombre }}</td><td>{{ merma.cantidad }}</td><td>{{ merma.get_motivo_display }}</td><td>Q {{ merma.costo_perdida }}</td></tr>
+                {% empty %}
+                <tr><td colspan="5" class="text-center text-muted py-4">Sin mermas registradas todavía.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 {% endblock %}

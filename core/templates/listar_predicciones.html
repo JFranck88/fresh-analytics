@@ -3,6 +3,7 @@
 {% block content %}
 <h5 class="mb-1">Predicción de ventas - próximos 7 días</h5>
 <p class="text-muted small">Corrida del modelo: {{ fecha_corrida }}</p>
+
 {% if mensajes_contexto %}
     <div class="mb-3">
         {% for m in mensajes_contexto %}
@@ -14,12 +15,14 @@
     </div>
 {% endif %}
 
-<div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="mb-0">Tendencia de predicción por producto</h6>
-        <select id="selector-producto" class="form-select form-select-sm" style="width: auto;"></select>
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">Tendencia de predicción por producto</h6>
+            <select id="selector-producto" class="form-select form-select-sm" style="width: auto;"></select>
+        </div>
+        <canvas id="grafica-prediccion" height="90"></canvas>
     </div>
-    <canvas id="grafica-prediccion" height="90"></canvas>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -46,8 +49,8 @@
                     {
                         label: 'Límite superior (80% confianza)',
                         data: datos.superior,
-                        borderColor: 'rgba(13,110,253,0.15)',
-                        backgroundColor: 'rgba(13,110,253,0.12)',
+                        borderColor: 'rgba(82,183,136,0.2)',
+                        backgroundColor: 'rgba(82,183,136,0.12)',
                         fill: '+1',
                         pointRadius: 0,
                         borderWidth: 1,
@@ -55,7 +58,7 @@
                     {
                         label: 'Límite inferior',
                         data: datos.inferior,
-                        borderColor: 'rgba(13,110,253,0.15)',
+                        borderColor: 'rgba(82,183,136,0.2)',
                         pointRadius: 0,
                         borderWidth: 1,
                         fill: false,
@@ -63,8 +66,8 @@
                     {
                         label: 'Predicho',
                         data: datos.predicho,
-                        borderColor: '#0d6efd',
-                        backgroundColor: '#0d6efd',
+                        borderColor: '#1B4332',
+                        backgroundColor: '#1B4332',
                         borderWidth: 2,
                         tension: 0.3,
                         pointRadius: 3,
@@ -74,8 +77,7 @@
             options: {
                 responsive: true,
                 plugins: { legend: { display: true, position: 'bottom' } },
-                
-                                scales: {
+                scales: {
                     y: {
                         beginAtZero: true,
                         title: { display: true, text: 'Unidades de venta esperadas' },
@@ -90,24 +92,30 @@
     if (primerProducto) dibujar(primerProducto);
 </script>
 
-<table class="table table-striped bg-white">
-    <thead><tr><th>Producto</th><th>Fecha</th><th>Predicho</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
-    <tbody>
-        {% for p in predicciones %}
-        <tr><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho }}</strong></td><td class="text-muted">{{ p.intervalo_inferior }} - {{ p.intervalo_superior }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
-        {% empty %}
-        <tr><td colspan="5" class="text-center text-muted">Todavía no hay predicciones generadas.</td></tr>
-        {% endfor %}
-    </tbody>
-</table>
-
-<hr class="my-4">
+<div class="card mb-4">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead><tr><th>Producto</th><th>Fecha</th><th>Predicho</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
+            <tbody>
+                {% for p in predicciones %}
+                <tr><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho }}</strong></td><td class="text-muted">{{ p.intervalo_inferior }} - {{ p.intervalo_superior }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
+                {% empty %}
+                <tr><td colspan="5" class="text-center text-muted py-4">Todavía no hay predicciones generadas.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 
 {% if validacion_json %}
-<h6 class="mb-1">Respaldo estadístico del modelo</h6>
-<p class="text-muted small">Validado con múltiples periodos históricos, no una sola prueba.</p>
-<canvas id="grafica-validacion" height="90"></canvas>
-<p id="meta-validacion" class="text-muted small mt-2"></p>
+<div class="card">
+    <div class="card-body">
+        <h6 class="mb-1">Respaldo estadístico del modelo</h6>
+        <p class="text-muted small">Validado con múltiples periodos históricos, no una sola prueba.</p>
+        <canvas id="grafica-validacion" height="90"></canvas>
+        <p id="meta-validacion" class="text-muted small mt-2 mb-0"></p>
+    </div>
+</div>
 
 <script>
     const validacion = {{ validacion_json|safe }};
@@ -120,8 +128,8 @@
             chart.data.datasets[0].data.forEach((valor, i) => {
                 const barra = chart.getDatasetMeta(0).data[i];
                 ctx.save();
-                ctx.fillStyle = '#212529';
-                ctx.font = 'bold 12px sans-serif';
+                ctx.fillStyle = '#1E2A24';
+                ctx.font = 'bold 12px Inter, sans-serif';
                 ctx.textAlign = 'center';
                 ctx.fillText(valor.toFixed(1) + '%', barra.x, barra.y - 8);
                 ctx.restore();
@@ -137,13 +145,13 @@
                     type: 'bar',
                     label: 'Error promedio del modelo',
                     data: validacion.mape,
-                    backgroundColor: validacion.mape.map(v => v <= META ? '#2e7d32' : '#c62828'),
+                    backgroundColor: validacion.mape.map(v => v <= META ? '#52B788' : '#C0392B'),
                 },
                 {
                     type: 'line',
                     label: `Meta del proyecto (${META}% máximo)`,
                     data: validacion.dias.map(() => META),
-                    borderColor: '#c62828',
+                    borderColor: '#C0392B',
                     borderDash: [6, 4],
                     borderWidth: 2,
                     pointRadius: 0,
@@ -170,6 +178,10 @@
         `Validado con ${validacion.productos} producto(s) · Última corrida: ${validacion.fecha}`;
 </script>
 {% else %}
-<p class="text-muted small">Aún no se ha ejecutado una validación cruzada. Corre <code>python manage.py auditar_modelo</code> para generar este respaldo.</p>
+<div class="card">
+    <div class="card-body">
+        <p class="text-muted small mb-0">Aún no se ha ejecutado una validación cruzada. Corre <code>python manage.py auditar_modelo</code> para generar este respaldo.</p>
+    </div>
+</div>
 {% endif %}
 {% endblock %}

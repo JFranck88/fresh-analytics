@@ -1,22 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
 <h5 class="mb-3">Alertas activas</h5>
-{% if alertas %}
-    <div class="list-group">
-        {% for alerta in alertas %}
-            <div class="list-group-item d-flex align-items-center gap-2">
-                <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
-                <span class="flex-grow-1">
-                    <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
-                    <span class="text-muted small d-block">{{ alerta.tipo }}</span>
-                </span>
-                <a href="{% url 'marcar_alerta_leida' alerta.id %}" class="btn btn-outline-secondary btn-sm">
-                    Marcar como leída
-                </a>
+<div class="card">
+    <div class="card-body p-0">
+        {% if alertas %}
+            <div class="list-group list-group-flush">
+                {% for alerta in alertas %}
+                    <div class="list-group-item d-flex align-items-center gap-2 py-3">
+                        <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
+                        <span class="flex-grow-1">
+                            <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
+                            <span class="text-muted small d-block">{{ alerta.tipo }}</span>
+                        </span>
+                        <a href="{% url 'marcar_alerta_leida' alerta.id %}" class="btn btn-outline-secondary btn-sm">
+                            Marcar como leída
+                        </a>
+                    </div>
+                {% endfor %}
             </div>
-        {% endfor %}
+        {% else %}
+            <p class="text-muted text-center py-4 mb-0">No hay alertas activas en este momento.</p>
+        {% endif %}
     </div>
-{% else %}
-    <p class="text-muted">No hay alertas activas en este momento.</p>
-{% endif %}
+</div>
 {% endblock %}

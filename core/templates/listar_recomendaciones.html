@@ -2,16 +2,20 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-1">
     <h5 class="mb-0">Recomendación de pedidos</h5>
-    <a href="{% url 'generar_orden_compra' %}" class="btn btn-dark btn-sm">Generar orden de compra (PDF)</a>
+    <a href="{% url 'generar_orden_compra' %}" class="btn btn-primary btn-sm">Generar orden de compra (PDF)</a>
 </div>
 <p class="text-muted small">Predicción 7 días - Stock actual = Cantidad sugerida</p>
-<table class="table table-striped bg-white">
-    <thead><tr><th>Producto</th><th>Predicción 7 días</th><th>Stock actual</th><th>Sugerido</th><th>Ajustar</th></tr></thead>
-    <tbody>
-        {% for r in recomendaciones %}
-        <tr><td>{{ r.producto }}</td><td>{{ r.prediccion_semana }}</td><td>{{ r.stock_actual }}</td><td><strong>{{ r.sugerido }}</strong></td><td><input type="number" class="form-control form-control-sm" style="width: 90px" value="{{ r.sugerido }}"></td></tr>
-        {% endfor %}
-    </tbody>
-</table>
-<p class="text-muted small">* El ajuste manual todavía no se guarda - pendiente de decisión de diseño.</p>
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead><tr><th>Producto</th><th>Predicción 7 días</th><th>Stock actual</th><th>Sugerido</th><th>Ajustar</th></tr></thead>
+            <tbody>
+                {% for r in recomendaciones %}
+                <tr><td>{{ r.producto }}</td><td>{{ r.prediccion_semana }}</td><td>{{ r.stock_actual }}</td><td><strong>{{ r.sugerido }}</strong></td><td><input type="number" class="form-control form-control-sm" style="width: 90px" value="{{ r.sugerido }}"></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+<p class="text-muted small mt-2">* El ajuste manual todavía no se guarda - pendiente de decisión de diseño.</p>
 {% endblock %}

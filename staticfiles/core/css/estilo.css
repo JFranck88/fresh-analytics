@@ -1,0 +1,97 @@
+:root {
+    --bosque: #1B4332;
+    --brote: #52B788;
+    --lino: #F7F5F0;
+    --tierra: #1E2A24;
+    --musgo: #6B7A72;
+}
+
+body {
+    background-color: var(--lino);
+    color: var(--tierra);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    color: var(--bosque);
+}
+
+.navbar-fresh {
+    background-color: var(--bosque) !important;
+}
+
+.navbar-fresh .nav-link {
+    color: rgba(247, 245, 240, 0.75) !important;
+}
+
+.navbar-fresh .nav-link:hover {
+    color: #ffffff !important;
+}
+
+.marca-fresh {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    margin-right: 1.5rem;
+}
+
+.marca-fresh img {
+    height: 34px;
+    width: 34px;
+}
+
+.marca-fresh .nombre-fresh {
+    font-weight: 700;
+    font-size: 18px;
+    color: #ffffff;
+}
+
+.marca-fresh .nombre-analytics {
+    font-weight: 400;
+    font-size: 18px;
+    color: var(--brote);
+    letter-spacing: 0.3px;
+    margin-left: 2px;
+}
+
+.card {
+    box-shadow: none !important;
+    border: 1px solid rgba(27, 67, 50, 0.15) !important;
+    border-radius: 14px !important;
+}
+
+.table thead th {
+    color: var(--musgo);
+    font-weight: 600;
+    border-bottom-width: 1px;
+}
+
+.btn-primary {
+    background-color: var(--bosque);
+    border-color: var(--bosque);
+}
+
+.btn-primary:hover {
+    background-color: #143a2a;
+    border-color: #143a2a;
+}
+
+.btn-outline-dark {
+    color: var(--bosque);
+    border-color: var(--bosque);
+}
+
+.btn-outline-dark:hover {
+    background-color: var(--bosque);
+    border-color: var(--bosque);
+}
+
+a {
+    color: var(--bosque);
+}
+
+a:hover {
+    color: var(--brote);
+}

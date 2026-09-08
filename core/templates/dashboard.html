@@ -23,26 +23,26 @@
 
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">
-        <div class="card shadow-sm">
+        <div class="card kpi-card kpi-brote">
             <div class="card-body">
-                <p class="text-muted small mb-1">Ventas de hoy</p>
-                <p class="fs-4 mb-0">Q {{ ventas_hoy|floatformat:2 }}</p>
+                <p class="kpi-etiqueta mb-0">Ventas de hoy</p>
+                <p class="kpi-valor mb-0">Q {{ ventas_hoy|floatformat:2 }}</p>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3">
-        <div class="card shadow-sm">
+        <div class="card kpi-card kpi-danger">
             <div class="card-body">
-                <p class="text-muted small mb-1">Merma de hoy</p>
-                <p class="fs-4 mb-0">Q {{ merma_hoy|floatformat:2 }}</p>
+                <p class="kpi-etiqueta mb-0">Merma de hoy</p>
+                <p class="kpi-valor mb-0">Q {{ merma_hoy|floatformat:2 }}</p>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3">
-        <div class="card shadow-sm border-warning">
+        <div class="card kpi-card kpi-amber">
             <div class="card-body">
-                <p class="text-muted small mb-1">Por vencer (7 días)</p>
-                <p class="fs-4 mb-0">{{ por_vencer_semana }} lote(s)</p>
+                <p class="kpi-etiqueta mb-0">Por vencer (7 días)</p>
+                <p class="kpi-valor mb-0">{{ por_vencer_semana }} lote(s)</p>
             </div>
         </div>
     </div>
