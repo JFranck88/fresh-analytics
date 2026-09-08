@@ -68,5 +68,48 @@
 {% else %}
     <p class="text-muted">No hay alertas activas en este momento.</p>
 {% endif %}
+{% if alertas %}
+<div class="modal fade" id="modalAlertas" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-bell-fill text-warning me-2"></i>Tienes {{ alertas|length }} alerta{{ alertas|length|pluralize }} activa{{ alertas|length|pluralize }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="list-group list-group-flush">
+                    {% for alerta in alertas|slice:":5" %}
+                        <div class="list-group-item d-flex align-items-center gap-2">
+                            <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
+                            <span>
+                                <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
+                            </span>
+                        </div>
+                    {% endfor %}
+                </div>
+                {% if alertas|length > 5 %}
+                    <p class="text-muted small mt-2 mb-0">Y {{ alertas|length|add:"-5" }} más...</p>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+                {% if user.rol == "GERENTE" or user.rol == "COMPRADOR" or user.is_superuser_admin %}
+                    <a href="{% url 'listar_alertas' %}" class="btn btn-primary btn-sm">Revisar todas</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!sessionStorage.getItem('alertas_mostradas')) {
+            const modalAlertas = new bootstrap.Modal(document.getElementById('modalAlertas'));
+            modalAlertas.show();
+            sessionStorage.setItem('alertas_mostradas', 'true');
+        }
+    });
+</script>
+{% endif %}
 
 {% endblock %}

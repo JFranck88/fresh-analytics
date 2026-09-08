@@ -7,6 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="{% static 'core/img/logo.svg' %}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link href="{% static 'core/css/estilo.css' %}" rel="stylesheet">
 </head>
 <body>
@@ -16,20 +17,21 @@
                 <img src="{% static 'core/img/logo.svg' %}" alt="Fresh Analytics">
                 <span><span class="nombre-fresh">Fresh</span><span class="nombre-analytics">Analytics</span></span>
             </a>
-            <div class="navbar-nav me-auto">
-                <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
-                <a href="{% url 'listar_predicciones' %}" class="nav-link">Predicciones</a>
+            <div class="navbar-nav me-auto d-flex flex-row align-items-center">
+                <a href="{% url 'dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}activo{% endif %}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
+                <a href="{% url 'listar_predicciones' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_predicciones' %}activo{% endif %}"><i class="bi bi-graph-up-arrow me-1"></i>Predicciones</a>
                 {% if user.rol == "COMPRADOR" or user.rol == "GERENTE" or user.is_superuser_admin %}
-                    <a href="{% url 'listar_alertas' %}" class="nav-link">Alertas</a>
-                    <a href="{% url 'listar_mermas' %}" class="nav-link">Mermas</a>
+                    <a href="{% url 'listar_alertas' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_alertas' %}activo{% endif %}"><i class="bi bi-bell me-1"></i>Alertas</a>
+                    <a href="{% url 'listar_mermas' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_mermas' %}activo{% endif %}"><i class="bi bi-recycle me-1"></i>Mermas</a>
                 {% endif %}
                 {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
-                    <a href="{% url 'listar_recomendaciones' %}" class="nav-link">Recomendaciones</a>
+                    <a href="{% url 'listar_recomendaciones' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_recomendaciones' %}activo{% endif %}"><i class="bi bi-cart-check me-1"></i>Recomendaciones</a>
                 {% endif %}
                 {% if user.rol == "ADMINISTRADOR" or user.is_superuser_admin %}
-                    <a href="{% url 'listar_usuarios' %}" class="nav-link">Usuarios</a>
-                    <a href="{% url 'listar_configuracion' %}" class="nav-link">Configuración</a>
-                    <a href="{% url 'mantenimiento' %}" class="nav-link">Mantenimiento</a>
+                    <div class="nav-divisor"></div>
+                    <a href="{% url 'listar_usuarios' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_usuarios' or request.resolver_match.url_name == 'crear_usuario' %}activo{% endif %}"><i class="bi bi-people me-1"></i>Usuarios</a>
+                    <a href="{% url 'listar_configuracion' %}" class="nav-link {% if request.resolver_match.url_name == 'listar_configuracion' %}activo{% endif %}"><i class="bi bi-gear me-1"></i>Configuración</a>
+                    <a href="{% url 'mantenimiento' %}" class="nav-link {% if request.resolver_match.url_name == 'mantenimiento' %}activo{% endif %}"><i class="bi bi-tools me-1"></i>Mantenimiento</a>
                 {% endif %}
             </div>
             <span class="text-white-50 small me-3">{{ user.nombre }} · {{ user.rol }}</span>
@@ -45,5 +47,8 @@
         {% endif %}
         {% block content %}{% endblock %}
     </div>
+        </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
 </body>
 </html>

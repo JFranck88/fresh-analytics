@@ -116,3 +116,25 @@ a:hover {
     color: var(--musgo);
     margin-bottom: 4px;
 }
+
+.navbar-fresh .nav-link {
+    padding: 6px 14px !important;
+    border-radius: 20px;
+    transition: background 0.15s;
+}
+
+.navbar-fresh .nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.navbar-fresh .nav-link.activo {
+    background-color: rgba(82, 183, 136, 0.22);
+    color: #ffffff !important;
+}
+
+.nav-divisor {
+    width: 1px;
+    height: 24px;
+    background-color: rgba(255, 255, 255, 0.2);
+    margin: 0 8px;
+}
