@@ -138,3 +138,29 @@ a:hover {
     background-color: rgba(255, 255, 255, 0.2);
     margin: 0 8px;
 }
+
+.card {
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    border-color: var(--brote) !important;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(82, 183, 136, 0.06);
+}
+
+.estado-vacio {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: var(--musgo);
+}
+
+.estado-vacio i {
+    font-size: 2rem;
+    color: var(--brote);
+    margin-bottom: 0.5rem;
+    display: block;
+}
