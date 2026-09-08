@@ -67,11 +67,38 @@
     </div>
 </div>
 
+<div class="card mb-4">
+    <div class="card-body">
+        <h6 class="mb-2"><i class="bi bi-bar-chart-line me-2"></i>Ventas de los últimos 7 días</h6>
+        <canvas id="grafica-ventas-semana" height="80"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+    new Chart(document.getElementById('grafica-ventas-semana').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: {{ ventas_labels_json|safe }},
+            datasets: [{
+                label: 'Ventas (Q)',
+                data: {{ ventas_datos_json|safe }},
+                backgroundColor: '#52B788',
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } },
+        }
+    });
+</script>
+
 {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
     <a href="{% url 'registrar_merma' %}" class="btn btn-outline-dark btn-sm mb-3">+ Registrar merma</a>
 {% endif %}
 
-<h6 class="mb-2">Alertas activas</h6>
+<h6 class="mb-2"><i class="bi bi-bell me-2"></i>Alertas activas</h6>
 <div class="card">
     <div class="card-body p-0">
         {% if alertas %}

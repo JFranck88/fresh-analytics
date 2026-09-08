@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.contrib import messages
 from django.db.models import Sum, F, DecimalField
+from django.db.models.functions import TruncDate
 from django.http import FileResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
@@ -110,6 +111,25 @@ def dashboard(request):
     dias_desde_prediccion = (hoy - fecha_prediccion_max).days if fecha_prediccion_max else None
     modelo_al_dia = dias_desde_prediccion is not None and dias_desde_prediccion == 0
 
+    inicio_semana = hoy - timedelta(days=6)
+    ventas_diarias = (
+        Venta.objects.filter(fecha__date__gte=inicio_semana, fecha__date__lte=hoy)
+        .annotate(dia=TruncDate("fecha"))
+        .values("dia")
+        .annotate(total=Sum(
+            F("cantidad") * F("precio_unitario"),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        ))
+        .order_by("dia")
+    )
+    mapa_ventas = {v["dia"]: float(v["total"]) for v in ventas_diarias}
+    ventas_labels = []
+    ventas_datos = []
+    for i in range(7):
+        dia = inicio_semana + timedelta(days=i)
+        ventas_labels.append(dia.strftime("%d/%m"))
+        ventas_datos.append(mapa_ventas.get(dia, 0))
+
     contexto = {
         "usuario": request.user,
         "ventas_hoy": ventas_hoy,
@@ -120,6 +140,8 @@ def dashboard(request):
         "modelo_al_dia": modelo_al_dia,
         "dias_desde_prediccion": dias_desde_prediccion,
         "fecha_prediccion_max": fecha_prediccion_max,
+        "ventas_labels_json": json.dumps(ventas_labels),
+        "ventas_datos_json": json.dumps(ventas_datos),
     }
     return render(request, "dashboard.html", contexto)
 
