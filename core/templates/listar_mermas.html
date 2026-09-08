@@ -14,7 +14,7 @@
                 {% for merma in mermas %}
                 <tr><td>{{ merma.fecha }}</td><td>{{ merma.producto.nombre }}</td><td>{{ merma.cantidad }}</td><td>{{ merma.get_motivo_display }}</td><td>Q {{ merma.costo_perdida }}</td></tr>
                 {% empty %}
-                <tr><td colspan="5" class="text-center text-muted py-4">Sin mermas registradas todavía.</td></tr>
+                <tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>Sin mermas registradas todavía.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

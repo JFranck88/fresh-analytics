@@ -24,7 +24,7 @@
                         {% for c in configuraciones %}
                         <tr><td>{{ c.clave }}</td><td>{{ c.valor }}</td><td class="text-muted small">{{ c.descripcion }}</td></tr>
                         {% empty %}
-                        <tr><td colspan="3" class="text-center text-muted py-4">Sin parámetros configurados todavía.</td></tr>
+                        <tr><td colspan="3" class="text-center text-muted py-4"><i class="bi bi-sliders me-2"></i>Sin parámetros configurados todavía.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
