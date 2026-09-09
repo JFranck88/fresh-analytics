@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 {% block content %}
-<h5 class="mb-1"><i class="bi bi-graph-up-arrow me-2"></i>Predicción de ventas...
+<h5 class="mb-1">Predicción de ventas - próximos 7 días</h5>
 <p class="text-muted small">Actualización del modelo: {{ fecha_corrida }}</p>
 
 {% if mensajes_contexto %}
@@ -28,6 +28,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
     const datosGrafica = {{ datos_grafica_json|safe }};
+    const diasLluvia = {{ dias_lluvia_json|safe }};
     const selector = document.getElementById('selector-producto');
     Object.keys(datosGrafica).forEach(nombre => {
         const opt = document.createElement('option');
@@ -63,14 +64,15 @@
                         borderWidth: 1,
                         fill: false,
                     },
-                    {
+                                        {
                         label: 'Venta Estimada',
                         data: datos.predicho,
                         borderColor: '#1B4332',
                         backgroundColor: '#1B4332',
                         borderWidth: 2,
                         tension: 0.3,
-                        pointRadius: 3,
+                        pointRadius: datos.labels.map(l => diasLluvia.includes(l) ? 6 : 3),
+                        pointBackgroundColor: datos.labels.map(l => diasLluvia.includes(l) ? '#E67E22' : '#1B4332'),
                     },
                 ]
             },
@@ -87,9 +89,22 @@
         });
     }
 
-    selector.addEventListener('change', (e) => dibujar(e.target.value));
+    function filtrarTabla(nombre) {
+        document.querySelectorAll('tbody tr[data-producto]').forEach(fila => {
+            fila.style.display = (fila.dataset.producto === nombre) ? '' : 'none';
+        });
+    }
+
+    selector.addEventListener('change', (e) => {
+        dibujar(e.target.value);
+        filtrarTabla(e.target.value);
+    });
+
     const primerProducto = Object.keys(datosGrafica)[0];
-    if (primerProducto) dibujar(primerProducto);
+    if (primerProducto) {
+        dibujar(primerProducto);
+        filtrarTabla(primerProducto);
+    }
 </script>
 
 <div class="card mb-4">
@@ -98,7 +113,7 @@
             <thead><tr><th>Producto</th><th>Fecha</th><th>Venta Estimada</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
             <tbody>
                 {% for p in predicciones %}
-                <tr><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho|floatformat:0 }}</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
+                <tr data-producto="{{ p.producto.nombre }}"><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho|floatformat:0 }}</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
                 {% empty %}
                 <tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-graph-up me-2"></i>Todavía no hay predicciones generadas.</td></tr>
                 {% endfor %}

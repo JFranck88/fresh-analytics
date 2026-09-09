@@ -223,6 +223,11 @@ def listar_predicciones(request):
         datos_grafica[p.producto.nombre]["inferior"].append(float(p.intervalo_inferior))
         datos_grafica[p.producto.nombre]["superior"].append(float(p.intervalo_superior))
 
+    dias_lluvia = []
+    for fecha, prob in pronostico_lluvia_real().items():
+        if prob >= 0.4:
+            dias_lluvia.append(fecha.strftime("%d/%m"))
+
     dias_desde_prediccion = (hoy - fecha_max).days if fecha_max else None
     validacion_cruzada = obtener_validacion_cruzada()
 
@@ -233,6 +238,7 @@ def listar_predicciones(request):
         "datos_grafica_json": json.dumps(datos_grafica),
         "validacion_json": json.dumps(validacion_cruzada) if validacion_cruzada else None,
         "mensajes_contexto": mensajes_contexto,
+        "dias_lluvia_json": json.dumps(dias_lluvia),
     })
 
 
