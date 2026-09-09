@@ -30,6 +30,14 @@ DIAS_SEMANA_ES = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
 ]
 
+CATEGORIA_TEXTO = {
+    "FRUTAS": "frutas",
+    "VERDURAS": "verduras",
+    "LACTEOS": "lácteos",
+    "CARNES": "carnes",
+    "PANADERIA": "productos de panadería",
+}
+
 
 def obtener_parametro(clave, default):
     try:
@@ -44,6 +52,42 @@ def obtener_validacion_cruzada():
         return json.loads(raw)
     except (Configuracion.DoesNotExist, json.JSONDecodeError):
         return None
+
+
+def categorias_afectadas_por_lluvia(fecha_lluvia):
+    """Revisa las predicciones REALES de la semana: para cada producto,
+    compara su venta estimada en el dia de lluvia contra el promedio de
+    sus otros dias. Si cae al menos 5%, se considera afectado, y se
+    devuelve el conjunto de categorias con al menos un producto
+    afectado - dinamico, no una lista escrita a mano."""
+    fecha_max = Prediccion.objects.order_by(
+        "-fecha_prediccion"
+    ).values_list("fecha_prediccion", flat=True).first()
+    if not fecha_max:
+        return set()
+
+    predicciones_semana = (
+        Prediccion.objects.filter(fecha_prediccion=fecha_max)
+        .select_related("producto")
+    )
+
+    por_producto = {}
+    for p in predicciones_semana:
+        por_producto.setdefault(p.producto_id, []).append(p)
+
+    categorias = set()
+    for filas in por_producto.values():
+        fila_lluvia = next((f for f in filas if f.fecha_pronosticada == fecha_lluvia), None)
+        if not fila_lluvia:
+            continue
+        otras = [f.valor_predicho for f in filas if f.fecha_pronosticada != fecha_lluvia]
+        if not otras:
+            continue
+        promedio_otros = sum(otras) / len(otras)
+        if promedio_otros > 0 and fila_lluvia.valor_predicho < promedio_otros * 0.95:
+            categorias.add(filas[0].producto.categoria)
+
+    return categorias
 
 
 def construir_contexto_inteligente(hoy):
@@ -62,13 +106,22 @@ def construir_contexto_inteligente(hoy):
             continue
         if prob >= 0.4:
             nombre_dia = DIAS_SEMANA_ES[fecha.weekday()]
-            mensajes.append({
-                "icono": "🌧️",
-                "texto": (
+            categorias = categorias_afectadas_por_lluvia(fecha)
+
+            if categorias:
+                nombres = sorted(CATEGORIA_TEXTO.get(c, c.lower()) for c in categorias)
+                if len(nombres) == 1:
+                    texto_categorias = nombres[0]
+                else:
+                    texto_categorias = ", ".join(nombres[:-1]) + " y " + nombres[-1]
+                texto = (
                     f"Se pronostica lluvia el {nombre_dia} ({fecha.strftime('%d/%m')}) "
-                    "- posible baja en la venta de frutas y verduras frescas."
-                ),
-            })
+                    f"- las predicciones muestran una posible baja en la venta de {texto_categorias}."
+                )
+            else:
+                texto = f"Se pronostica lluvia el {nombre_dia} ({fecha.strftime('%d/%m')})."
+
+            mensajes.append({"icono": "🌧️", "texto": texto})
             break
 
     return mensajes
