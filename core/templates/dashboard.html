@@ -127,7 +127,7 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-bell-fill text-warning me-2"></i>Tienes {{ alertas|length }} alerta{{ alertas|length|pluralize }} activa{{ alertas|length|pluralize }}</h5>
+               <h5 class="modal-title"><i class="bi bi-bell-fill text-danger me-2"></i>Tienes {{ alertas|length }} alerta{{ alertas|length|pluralize }} activa{{ alertas|length|pluralize }}</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -166,3 +166,4 @@
 </script>
 {% endif %}
 {% endblock %}
+
