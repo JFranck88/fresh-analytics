@@ -18,13 +18,12 @@ class LoginForm(AuthenticationForm):
 class MermaForm(forms.ModelForm):
     class Meta:
         model = Merma
-        fields = ["producto", "fecha", "cantidad", "motivo", "costo_perdida"]
+        fields = ["producto", "fecha", "cantidad", "motivo"]
         widgets = {
             "producto": forms.Select(attrs={"class": "form-select"}),
             "fecha": forms.DateInput(attrs={"class": "form-control", "type": "date"}),
             "cantidad": forms.NumberInput(attrs={"class": "form-control", "step": "0.1"}),
             "motivo": forms.Select(attrs={"class": "form-select"}),
-            "costo_perdida": forms.NumberInput(attrs={"class": "form-control", "step": "0.01"}),
         }
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

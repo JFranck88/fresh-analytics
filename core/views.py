@@ -182,7 +182,9 @@ def registrar_merma(request):
     if request.method == "POST":
         form = MermaForm(request.POST)
         if form.is_valid():
-            form.save()
+            merma = form.save(commit=False)
+            merma.costo_perdida = round(float(merma.producto.precio_compra) * merma.cantidad, 2)
+            merma.save()
             messages.success(request, "Merma registrada correctamente.")
             return redirect("dashboard")
     else:
