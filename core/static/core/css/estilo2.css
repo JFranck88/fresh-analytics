@@ -17,35 +17,23 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--bosque);
 }
 
-.navbar-fresh {
-    background-color: var(--bosque) !important;
-}
-
-.navbar-fresh .nav-link {
-    color: rgba(247, 245, 240, 0.75) !important;
-}
-
-.navbar-fresh .nav-link:hover {
-    color: #ffffff !important;
-}
-
 .marca-fresh {
     display: flex;
     align-items: center;
     gap: 10px;
     text-decoration: none;
-    margin-right: 1.5rem;
 }
 
 .marca-fresh img {
     height: 34px;
     width: 34px;
+    flex-shrink: 0;
 }
 
 .marca-fresh .nombre-fresh {
     font-weight: 700;
     font-size: 18px;
-    color: #ffffff;
+    color: var(--bosque);
 }
 
 .marca-fresh .nombre-analytics {
@@ -117,28 +105,6 @@ a:hover {
     margin-bottom: 4px;
 }
 
-.navbar-fresh .nav-link {
-    padding: 6px 14px !important;
-    border-radius: 20px;
-    transition: background 0.15s;
-}
-
-.navbar-fresh .nav-link:hover {
-    background-color: rgba(255, 255, 255, 0.08);
-}
-
-.navbar-fresh .nav-link.activo {
-    background-color: rgba(82, 183, 136, 0.22);
-    color: #ffffff !important;
-}
-
-.nav-divisor {
-    width: 1px;
-    height: 24px;
-    background-color: rgba(255, 255, 255, 0.2);
-    margin: 0 8px;
-}
-
 .card {
     transition: transform 0.15s ease, border-color 0.15s ease;
 }
@@ -165,7 +131,7 @@ a:hover {
     display: block;
 }
 
-.container {
+.app-content {
     animation: fresh-fade-in 0.35s ease;
 }
 
@@ -199,11 +165,255 @@ a:hover {
     background-color: var(--lino);
 }
 
-.navbar-fresh {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-}
-
 #modalAlertas .modal-header {
     background-color: rgba(192, 57, 43, 0.08);
     border-bottom-color: rgba(192, 57, 43, 0.2);
+}
+
+/* ============================================
+   Layout general: sidebar + topbar (app shell)
+   ============================================ */
+
+.app-shell {
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    background-color: #ffffff;
+    border-right: 1px solid rgba(27, 67, 50, 0.12);
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    transition: width 0.2s ease;
+    z-index: 1030;
+}
+
+.sidebar-header {
+    padding: 20px 18px;
+    border-bottom: 1px solid rgba(27, 67, 50, 0.08);
+}
+
+.sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sidebar-link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: var(--tierra);
+    text-decoration: none;
+    font-size: 14.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-link i {
+    font-size: 1.15rem;
+    width: 22px;
+    text-align: center;
+    color: var(--musgo);
+    flex-shrink: 0;
+    transition: color 0.15s;
+}
+
+.sidebar-link:hover {
+    background-color: rgba(82, 183, 136, 0.10);
+    color: var(--bosque);
+}
+
+.sidebar-link.activo {
+    background-color: var(--bosque);
+    color: #ffffff;
+}
+
+.sidebar-link.activo i {
+    color: var(--brote);
+}
+
+.sidebar-badge {
+    margin-left: auto;
+    background-color: #C0392B;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    flex-shrink: 0;
+}
+
+.sidebar-divisor {
+    height: 1px;
+    background-color: rgba(27, 67, 50, 0.08);
+    margin: 8px 6px;
+}
+
+.sidebar-colapsar {
+    border: none;
+    background: none;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px;
+    color: var(--musgo);
+    font-size: 13px;
+    border-top: 1px solid rgba(27, 67, 50, 0.08);
+    cursor: pointer;
+}
+
+.sidebar-colapsar:hover {
+    color: var(--bosque);
+}
+
+/* Estado colapsado (solo íconos) — escritorio */
+.sidebar-colapsada .sidebar {
+    width: 72px;
+}
+
+.sidebar-colapsada .sidebar-texto,
+.sidebar-colapsada .marca-texto {
+    display: none;
+}
+
+.sidebar-colapsada .sidebar-header {
+    display: flex;
+    justify-content: center;
+    padding: 20px 8px;
+}
+
+.sidebar-colapsada .sidebar-link {
+    justify-content: center;
+    padding: 10px;
+}
+
+.sidebar-colapsada .sidebar-badge {
+    position: absolute;
+    top: 2px;
+    right: 6px;
+    margin-left: 0;
+}
+
+.sidebar-colapsada .sidebar-colapsar {
+    justify-content: center;
+}
+
+.sidebar-colapsada .sidebar-colapsar i {
+    transform: rotate(180deg);
+}
+
+.app-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.topbar {
+    display: flex;
+    align-items: center;
+    padding: 12px 24px;
+    border-bottom: 1px solid rgba(27, 67, 50, 0.08);
+    background-color: #ffffff;
+    position: sticky;
+    top: 0;
+    z-index: 1020;
+}
+
+.topbar-toggle {
+    border: none;
+    background: none;
+    font-size: 1.4rem;
+    color: var(--bosque);
+    margin-right: 10px;
+    line-height: 1;
+}
+
+.topbar-usuario {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(27, 67, 50, 0.15);
+    background-color: #ffffff;
+    border-radius: 999px;
+    padding: 5px 14px 5px 5px;
+    font-size: 13.5px;
+    color: var(--tierra);
+}
+
+.topbar-usuario-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background-color: var(--bosque);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.topbar-usuario-rol {
+    color: var(--musgo);
+    font-size: 12px;
+}
+
+.app-content {
+    flex: 1;
+    padding: 24px;
+}
+
+.sidebar-overlay {
+    display: none;
+}
+
+/* Sidebar en móvil: panel fuera de pantalla que entra sobre el contenido */
+@media (max-width: 991.98px) {
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        transform: translateX(-100%);
+        box-shadow: 0 0 24px rgba(0, 0, 0, 0.15);
+    }
+
+    .sidebar-movil-abierta .sidebar {
+        transform: translateX(0);
+    }
+
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background-color: rgba(0, 0, 0, 0.35);
+        z-index: 1025;
+    }
+
+    .sidebar-movil-abierta .sidebar-overlay {
+        display: block;
+    }
+
+    .app-content {
+        padding: 18px;
+    }
 }
