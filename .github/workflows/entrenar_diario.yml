@@ -34,6 +34,9 @@ jobs:
       - name: Instalar dependencias (incluye Prophet)
         run: pip install -r requirements.txt
 
+      - name: Actualizar historial de ventas (mantiene vivo el pronóstico)
+        run: python manage.py actualizar_historial_ventas
+
       - name: Entrenar modelo Prophet (RF-03)
         run: python manage.py entrenar_modelo
 
