@@ -1,10 +1,11 @@
 from django.contrib import admin
-from .models import Producto, Venta, Inventario, Merma, Prediccion, Alerta, Configuracion
+from .models import Producto, Venta, Inventario, Merma, Prediccion, Alerta, Configuracion, DecisionHistorial
 
 
 @admin.register(Producto)
 class ProductoAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "categoria", "vida_util_dias", "precio_venta", "activo")
+    list_display = ("codigo_upc", "nombre", "categoria", "vida_util_dias", "precio_venta", "activo")
+    search_fields = ("codigo_upc", "nombre")
 
 
 @admin.register(Venta)
@@ -25,5 +26,11 @@ class MermaAdmin(admin.ModelAdmin):
 admin.site.register(Prediccion)
 admin.site.register(Alerta)
 admin.site.register(Configuracion)
+
+
+@admin.register(DecisionHistorial)
+class DecisionHistorialAdmin(admin.ModelAdmin):
+    list_display = ("producto", "usuario", "fecha_decision", "cantidad_sugerida", "cantidad_ajustada")
+    list_filter = ("usuario",)
 
 # Register your models here.

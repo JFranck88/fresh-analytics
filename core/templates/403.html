@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acceso no autorizado · Fresh Analytics</title>
+<style>
+  :root { --bosque:#1B4332; --brote:#52B788; --lino:#F7F5F0; --tierra:#1E2A24; --musgo:#6B7A72; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--lino); color: var(--tierra); padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  .tarjeta {
+    max-width: 440px; width: 100%; text-align: center; background: #fff; border-radius: 16px;
+    padding: 48px 36px; box-shadow: 0 10px 40px rgba(27,67,50,0.08);
+  }
+  .marca { font-weight: 700; font-size: 15px; letter-spacing: 0.3px; color: var(--bosque); margin-bottom: 28px; }
+  .marca span { color: var(--brote); }
+  .icono {
+    width: 64px; height: 64px; margin: 0 auto 20px; border-radius: 50%;
+    background: rgba(217,83,79,0.12); display: flex; align-items: center; justify-content: center;
+    color: #b3413c;
+  }
+  .codigo { font-size: 13px; font-weight: 600; letter-spacing: 1px; color: var(--musgo); text-transform: uppercase; margin-bottom: 6px; }
+  h1 { font-size: 22px; margin: 0 0 12px; color: var(--tierra); }
+  p { font-size: 15px; line-height: 1.5; color: var(--musgo); margin: 0 0 28px; }
+  .boton { display: inline-block; background: var(--bosque); color: #fff; text-decoration: none;
+    padding: 12px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+  .boton:hover { background: #163a29; }
+</style>
+</head>
+<body>
+  <div class="tarjeta">
+    <div class="marca">Fresh<span>Analytics</span></div>
+    <div class="icono">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+    </div>
+    <div class="codigo">Error 403</div>
+    <h1>Acceso no autorizado</h1>
+    <p>No tienes permiso para ver esta sección con tu rol actual. Si crees que es un error, contacta a un administrador.</p>
+    <a class="boton" href="/">Volver al inicio</a>
+  </div>
+</body>
+</html>

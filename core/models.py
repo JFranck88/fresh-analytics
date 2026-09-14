@@ -22,6 +22,13 @@ class Producto(models.Model):
 
     id_producto = models.AutoField(primary_key=True)
     nombre = models.CharField(max_length=200)
+    codigo_upc = models.CharField(
+        max_length=64, blank=True, null=True, unique=True,
+        help_text="Código de barras (UPC/EAN) del producto, si se conoce. "
+                   "NULL cuando no se conoce (no cadena vacía), para que dos "
+                   "productos sin UPC no choquen contra la restricción de "
+                   "unicidad - solo choca si de verdad se repite un código.",
+    )
     categoria = models.CharField(max_length=50, choices=Categoria.choices)
     vida_util_dias = models.PositiveIntegerField()
     proveedor = models.CharField(max_length=100, blank=True, default="")
@@ -230,6 +237,7 @@ class Alerta(models.Model):
     tipo = models.CharField(max_length=20, choices=Tipo.choices)
     mensaje = models.TextField()
     leida = models.BooleanField(default=False)
+    fecha_lectura = models.DateTimeField(null=True, blank=True)
     accion_tomada = models.TextField(blank=True, default="")
     usuario_lector = models.ForeignKey(
         Usuario, on_delete=models.SET_NULL, null=True, blank=True,
@@ -247,6 +255,48 @@ class Alerta(models.Model):
 
     def __str__(self):
         return f"Alerta {self.tipo} - {self.producto}"
+
+
+class DecisionHistorial(models.Model):
+    """RF-09 / UC-05: registra cada vez que un Comprador ajusta manualmente
+    la cantidad sugerida por el modelo, para poder comparar después
+    sugerido vs. ajustado y ver el MAPE que tenía el modelo en ese momento.
+    Solo se crea/actualiza un registro cuando el ajuste es distinto al
+    valor sugerido (ver listar_recomendaciones)."""
+
+    id_historial = models.AutoField(primary_key=True)
+    producto = models.ForeignKey(
+        Producto, on_delete=models.CASCADE, db_column="id_producto",
+        related_name="historial_decisiones",
+    )
+    usuario = models.ForeignKey(
+        Usuario, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column="id_usuario", related_name="decisiones_tomadas",
+    )
+    fecha_decision = models.DateTimeField(auto_now_add=True)
+    fecha_prediccion = models.DateField(
+        help_text="Fecha de corrida del modelo (Prediccion.fecha_prediccion) usada para esta recomendación.",
+    )
+    cantidad_sugerida = models.FloatField()
+    cantidad_ajustada = models.FloatField()
+
+    class Meta:
+        db_table = "decision_historial"
+        verbose_name = "Historial de decisión"
+        verbose_name_plural = "Historial de decisiones"
+        indexes = [
+            models.Index(fields=["producto"], name="idx_decision_producto"),
+            models.Index(fields=["usuario"], name="idx_decision_usuario"),
+            models.Index(fields=["fecha_decision"], name="idx_decision_fecha"),
+        ]
+        unique_together = [("producto", "usuario", "fecha_prediccion")]
+
+    def __str__(self):
+        return f"Decisión {self.producto} - {self.fecha_prediccion}"
+
+    @property
+    def diferencia(self):
+        return self.cantidad_ajustada - self.cantidad_sugerida
 
 
 class Configuracion(models.Model):

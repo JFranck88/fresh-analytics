@@ -7,10 +7,14 @@
             <div class="card-body">
                 <form method="post">
                     {% csrf_token %}
+                    {% if editando %}<input type="hidden" name="id_config" value="{{ editando.id_config }}">{% endif %}
                     <div class="mb-2"><label class="form-label">Clave</label>{{ form.clave }}</div>
                     <div class="mb-2"><label class="form-label">Valor</label>{{ form.valor }}</div>
                     <div class="mb-2"><label class="form-label">Descripción</label>{{ form.descripcion }}</div>
-                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save me-1"></i>Guardar parámetro</button>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save me-1"></i>{% if editando %}Actualizar parámetro{% else %}Guardar parámetro{% endif %}</button>
+                        {% if editando %}<a href="{% url 'listar_configuracion' %}" class="btn btn-outline-secondary btn-sm">Cancelar</a>{% endif %}
+                    </div>
                 </form>
             </div>
         </div>
@@ -19,12 +23,17 @@
         <div class="card">
             <div class="card-body p-0">
                 <table class="table table-striped mb-0">
-                    <thead><tr><th>Clave</th><th>Valor</th><th>Descripción</th></tr></thead>
+                    <thead><tr><th>Clave</th><th>Valor</th><th>Descripción</th><th></th></tr></thead>
                     <tbody>
                         {% for c in configuraciones %}
-                        <tr><td>{{ c.clave }}</td><td>{{ c.valor }}</td><td class="text-muted small">{{ c.descripcion }}</td></tr>
+                        <tr>
+                            <td>{{ c.clave }}</td>
+                            <td>{{ c.valor }}</td>
+                            <td class="text-muted small">{{ c.descripcion }}</td>
+                            <td><a href="?editar={{ c.id_config }}" class="btn btn-outline-secondary btn-sm" title="Editar"><i class="bi bi-pencil"></i></a></td>
+                        </tr>
                         {% empty %}
-                        <tr><td colspan="3" class="text-center text-muted py-4"><i class="bi bi-sliders me-2"></i>Sin parámetros configurados todavía.</td></tr>
+                        <tr><td colspan="4" class="text-center text-muted py-4"><i class="bi bi-sliders me-2"></i>Sin parámetros configurados todavía.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

@@ -37,6 +37,9 @@
                 </a>
             {% endif %}
             {% if user.rol == "COMPRADOR" or user.rol == "GERENTE" or user.is_superuser_admin %}
+                <a href="{% url 'historial_decisiones' %}" class="sidebar-link {% if request.resolver_match.url_name == 'historial_decisiones' %}activo{% endif %}" title="Historial de Decisiones">
+                    <i class="bi bi-clock-history"></i><span class="sidebar-texto">Historial de Decisiones</span>
+                </a>
                 <a href="{% url 'listar_alertas' %}" class="sidebar-link {% if request.resolver_match.url_name == 'listar_alertas' %}activo{% endif %}" title="Alertas">
                     <i class="bi bi-bell"></i><span class="sidebar-texto">Alertas</span>
                     {% if alertas_activas_count %}<span class="sidebar-badge">{{ alertas_activas_count }}</span>{% endif %}
@@ -69,6 +72,10 @@
             <button type="button" class="topbar-toggle d-lg-none" id="btnAbrirSidebar" aria-label="Abrir menú">
                 <i class="bi bi-list"></i>
             </button>
+            <form method="get" action="{% url 'buscar_global' %}" class="topbar-buscador d-none d-md-flex">
+                <i class="bi bi-search"></i>
+                <input type="search" name="q" placeholder="Buscar producto, lote, alerta…" value="{{ request.GET.q }}" autocomplete="off">
+            </form>
             <div class="flex-grow-1"></div>
             <div class="dropdown">
                 <button class="topbar-usuario dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">

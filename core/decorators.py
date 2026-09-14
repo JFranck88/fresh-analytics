@@ -6,7 +6,7 @@ from functools import wraps
 def rol_requerido(*roles_permitidos):
     """
     Restringe una vista a los roles indicados, según los casos de uso
-    documentados (Figuras 18, 19 y 20 del Capítulo IV).
+    documentados
 
     Excepción: is_superuser_admin=True se salta esta restricción -
     es un modo técnico de soporte/desarrollo, separado del rol de

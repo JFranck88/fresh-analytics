@@ -17,10 +17,15 @@
 
 <div class="card mb-4">
     <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <h6 class="mb-0">Tendencia de predicción por producto</h6>
-            <select id="selector-producto" class="form-select form-select-sm" style="width: auto;"></select>
+            <div class="d-flex gap-2">
+                <input type="text" id="buscar-upc-prediccion" class="form-control form-control-sm" style="width: 120px;" placeholder="UPC" inputmode="numeric" autocomplete="off">
+                <input type="text" id="buscar-desc-prediccion" class="form-control form-control-sm" style="width: 180px;" placeholder="Descripción" autocomplete="off">
+            </div>
         </div>
+        <div id="resultados-prediccion" class="list-group mb-2"></div>
+        <p class="text-muted small mb-2">Mostrando: <strong id="producto-actual-texto">—</strong></p>
         <canvas id="grafica-prediccion" height="90"></canvas>
     </div>
 </div>
@@ -28,18 +33,72 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
     const datosGrafica = {{ datos_grafica_json|safe }};
+    const infoProductos = {{ info_productos_json|safe }};
     const diasLluvia = {{ dias_lluvia_json|safe }};
-    const selector = document.getElementById('selector-producto');
-    Object.keys(datosGrafica).forEach(nombre => {
-        const opt = document.createElement('option');
-        opt.value = nombre;
-        opt.textContent = nombre;
-        selector.appendChild(opt);
-    });
+
+    const inputUpcPrediccion = document.getElementById('buscar-upc-prediccion');
+    const inputDescPrediccion = document.getElementById('buscar-desc-prediccion');
+    const resultadosPrediccion = document.getElementById('resultados-prediccion');
+    const productoActualTexto = document.getElementById('producto-actual-texto');
+    let temporizadorPrediccion;
+
+    function etiquetaProducto(pid) {
+        const info = infoProductos[pid] || {};
+        return `${info.upc || '—'} — ${info.nombre || pid}`;
+    }
+
+    function buscarProductoLocal() {
+        const upc = inputUpcPrediccion.value.trim().toLowerCase();
+        const q = inputDescPrediccion.value.trim().toLowerCase();
+        resultadosPrediccion.innerHTML = '';
+        if (!upc && !q) return;
+
+        const coincidencias = Object.keys(infoProductos).filter(pid => {
+            const info = infoProductos[pid];
+            const okUpc = !upc || (info.upc || '').toLowerCase().includes(upc);
+            const okDesc = !q || (info.nombre || '').toLowerCase().includes(q);
+            return okUpc && okDesc;
+        });
+
+        if (!coincidencias.length) {
+            resultadosPrediccion.innerHTML = '<div class="list-group-item text-muted small">Sin coincidencias.</div>';
+            return;
+        }
+        coincidencias.forEach(pid => {
+            const info = infoProductos[pid];
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'list-group-item list-group-item-action d-flex gap-3';
+            item.innerHTML = `<span class="text-muted small" style="width: 90px;">${info.upc || '—'}</span><span>${info.nombre}</span>`;
+            item.addEventListener('click', () => seleccionarProducto(pid));
+            resultadosPrediccion.appendChild(item);
+        });
+    }
+
+    function seleccionarProducto(pid) {
+        productoActualTexto.textContent = etiquetaProducto(pid);
+        dibujar(pid);
+        filtrarTabla(pid);
+        resultadosPrediccion.innerHTML = '';
+        inputUpcPrediccion.value = '';
+        inputDescPrediccion.value = '';
+    }
+
+    inputUpcPrediccion.addEventListener('input', () => { clearTimeout(temporizadorPrediccion); temporizadorPrediccion = setTimeout(buscarProductoLocal, 150); });
+    inputDescPrediccion.addEventListener('input', () => { clearTimeout(temporizadorPrediccion); temporizadorPrediccion = setTimeout(buscarProductoLocal, 150); });
+
+    function manejarEnterPrediccion(e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const primero = resultadosPrediccion.querySelector('button');
+        if (primero) primero.click();
+    }
+    inputUpcPrediccion.addEventListener('keydown', manejarEnterPrediccion);
+    inputDescPrediccion.addEventListener('keydown', manejarEnterPrediccion);
 
     let chartTendencia;
-    function dibujar(nombre) {
-        const datos = datosGrafica[nombre];
+    function dibujar(pid) {
+        const datos = datosGrafica[pid];
         if (chartTendencia) chartTendencia.destroy();
         const ctx = document.getElementById('grafica-prediccion').getContext('2d');
         chartTendencia = new Chart(ctx, {
@@ -89,33 +148,32 @@
         });
     }
 
-    function filtrarTabla(nombre) {
+    function filtrarTabla(pid) {
         document.querySelectorAll('tbody tr[data-producto]').forEach(fila => {
-            fila.style.display = (fila.dataset.producto === nombre) ? '' : 'none';
+            fila.style.display = (fila.dataset.producto === pid) ? '' : 'none';
         });
     }
 
-    selector.addEventListener('change', (e) => {
-        dibujar(e.target.value);
-        filtrarTabla(e.target.value);
-    });
+    const parametros = new URLSearchParams(window.location.search);
+    const productoSolicitado = parametros.get('producto');
+    const productoInicial = (productoSolicitado && datosGrafica[productoSolicitado])
+        ? productoSolicitado
+        : Object.keys(datosGrafica)[0];
 
-    const primerProducto = Object.keys(datosGrafica)[0];
-    if (primerProducto) {
-        dibujar(primerProducto);
-        filtrarTabla(primerProducto);
+    if (productoInicial) {
+        seleccionarProducto(productoInicial);
     }
 </script>
 
 <div class="card mb-4">
     <div class="card-body p-0">
         <table class="table table-striped mb-0">
-            <thead><tr><th>Producto</th><th>Fecha</th><th>Venta Estimada</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
+            <thead><tr><th>UPC</th><th>Producto</th><th>Fecha</th><th>Venta Estimada</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
             <tbody>
                 {% for p in predicciones %}
-                <tr data-producto="{{ p.producto.nombre }}"><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho|floatformat:0 }}</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
+                <tr data-producto="{{ p.producto.id_producto }}"><td class="text-muted small">{{ p.producto.codigo_upc|default:"—" }}</td><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho|floatformat:0 }}</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
                 {% empty %}
-                <tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-graph-up me-2"></i>Todavía no hay predicciones generadas.</td></tr>
+                <tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-graph-up me-2"></i>Todavía no hay predicciones generadas.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

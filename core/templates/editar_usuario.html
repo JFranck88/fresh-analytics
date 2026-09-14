@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 500px;">
+    <h5 class="mb-3">Editar usuario: {{ usuario_editado.nombre }}</h5>
+    <div class="card">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                {% endif %}
+                <div class="mb-3"><label class="form-label">Nombre</label>{{ form.nombre }}</div>
+                <div class="mb-3"><label class="form-label">Correo</label>{{ form.correo }}</div>
+                <div class="mb-3"><label class="form-label">Rol</label>{{ form.rol }}</div>
+                <div class="mb-3 form-check">
+                    {{ form.is_active }}
+                    <label class="form-check-label" for="{{ form.is_active.id_for_label }}">{{ form.is_active.label }}</label>
+                    {% if form.is_active.errors %}
+                        <div class="text-danger small">{{ form.is_active.errors }}</div>
+                    {% endif %}
+                    {% if es_uno_mismo %}
+                        <div class="form-text">Es tu propia cuenta: no puedes desactivarla desde aquí.</div>
+                    {% endif %}
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-check-circle me-1"></i>Guardar cambios</button>
+                    <a href="{% url 'listar_usuarios' %}" class="btn btn-outline-secondary">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

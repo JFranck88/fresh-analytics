@@ -10,7 +10,7 @@
                         <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
                         <span class="flex-grow-1">
                             <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
-                            <span class="text-muted small d-block">{{ alerta.tipo }}</span>
+                            <span class="text-muted small d-block">{{ alerta.tipo }}{% if alerta.producto_upc %} · UPC {{ alerta.producto_upc }}{% endif %}</span>
                         </span>
                         <a href="{% url 'marcar_alerta_leida' alerta.id %}" class="btn btn-outline-secondary btn-sm">
                             Marcar como leída

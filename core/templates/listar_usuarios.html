@@ -6,11 +6,31 @@
 </div>
 <div class="card">
     <div class="card-body p-0">
-        <table class="table table-striped mb-0">
-            <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Último acceso</th></tr></thead>
+        <table class="table table-striped mb-0 align-middle">
+            <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th class="text-end">Acciones</th></tr></thead>
             <tbody>
                 {% for u in usuarios %}
-                <tr><td>{{ u.nombre }}</td><td>{{ u.correo }}</td><td>{{ u.rol }}</td><td>{{ u.ultimo_acceso|default:"Nunca" }}</td></tr>
+                <tr>
+                    <td>{{ u.nombre }}</td>
+                    <td>{{ u.correo }}</td>
+                    <td>{{ u.rol }}</td>
+                    <td>
+                        {% if u.is_active %}
+                            <span class="badge bg-success">Activo</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Inactivo</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ u.ultimo_acceso|default:"Nunca" }}</td>
+                    <td class="text-end">
+                        <a href="{% url 'editar_usuario' u.id_usuario %}" class="btn btn-outline-secondary btn-sm" title="Editar">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <a href="{% url 'restablecer_password_usuario' u.id_usuario %}" class="btn btn-outline-secondary btn-sm" title="Restablecer contraseña">
+                            <i class="bi bi-key"></i>
+                        </a>
+                    </td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>

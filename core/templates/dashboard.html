@@ -34,7 +34,7 @@
                         <p class="kpi-etiqueta mb-0">Ventas de hoy</p>
                         <p class="kpi-valor mb-0">Q {{ ventas_hoy|floatformat:2 }}</p>
                     </div>
-                    <i class="bi bi-cash-coin" style="font-size: 1.4rem; color: var(--brote);"></i>
+                    <div class="kpi-icono kpi-icono-brote"><i class="bi bi-cash-coin"></i></div>
                 </div>
             </div>
         </div>
@@ -47,7 +47,7 @@
                         <p class="kpi-etiqueta mb-0">Merma de hoy</p>
                         <p class="kpi-valor mb-0">Q {{ merma_hoy|floatformat:2 }}</p>
                     </div>
-                    <i class="bi bi-trash3" style="font-size: 1.4rem; color: #C0392B;"></i>
+                    <div class="kpi-icono kpi-icono-danger"><i class="bi bi-trash3"></i></div>
                 </div>
             </div>
         </div>
@@ -60,7 +60,7 @@
                         <p class="kpi-etiqueta mb-0">Por vencer (7 días)</p>
                         <p class="kpi-valor mb-0">{{ por_vencer_semana }} lote(s)</p>
                     </div>
-                    <i class="bi bi-hourglass-split" style="font-size: 1.4rem; color: #C08500;"></i>
+                    <div class="kpi-icono kpi-icono-amber"><i class="bi bi-hourglass-split"></i></div>
                 </div>
             </div>
         </div>
@@ -109,7 +109,7 @@
                         <span class="flex-grow-1">
                             <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
                         </span>
-                        <span class="text-muted small">{{ alerta.tipo }}</span>
+                        <span class="text-muted small">{{ alerta.tipo }}{% if alerta.producto_upc %} · UPC {{ alerta.producto_upc }}{% endif %}</span>
                     </div>
                 {% endfor %}
             </div>
@@ -137,6 +137,7 @@
                             <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
                             <span>
                                 <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
+                                {% if alerta.producto_upc %}<span class="text-muted small d-block">UPC {{ alerta.producto_upc }}</span>{% endif %}
                             </span>
                         </div>
                     {% endfor %}

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block titulo %} - Búsqueda{% endblock %}
+{% block content %}
+
+<div class="mb-4">
+    <h5 class="mb-1">Resultados{% if consulta %} para "{{ consulta }}"{% endif %}</h5>
+    <p class="text-muted small mb-0">Productos, lotes y alertas que coinciden con tu búsqueda.</p>
+</div>
+
+{% if not consulta %}
+    <div class="estado-vacio">
+        <i class="bi bi-search"></i>
+        Escribe algo en el buscador de arriba para empezar.
+    </div>
+{% elif not hay_resultados %}
+    <div class="estado-vacio">
+        <i class="bi bi-search"></i>
+        No encontramos nada para "{{ consulta }}".
+    </div>
+{% else %}
+
+    {% if productos %}
+    <h6 class="mb-2"><i class="bi bi-box-seam me-2"></i>Productos</h6>
+    <div class="card mb-4">
+        <div class="list-group list-group-flush">
+            {% for p in productos %}
+            <a href="{% url 'listar_predicciones' %}?producto={{ p.id_producto }}"
+               class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                <span class="text-muted small">{{ p.codigo_upc|default:"—" }}</span>
+                <span class="flex-grow-1 ms-3"><strong>{{ p.nombre }}</strong> <span class="text-muted small">— {{ p.get_categoria_display }}</span></span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if puede_ver_operativo and alertas %}
+    <h6 class="mb-2"><i class="bi bi-bell me-2"></i>Alertas activas</h6>
+    <div class="card mb-4">
+        <div class="list-group list-group-flush">
+            {% for a in alertas %}
+            <a href="{% url 'listar_alertas' %}" class="list-group-item list-group-item-action d-flex align-items-center gap-2">
+                <span class="badge bg-{{ a.nivel }}">&nbsp;</span>
+                <span class="flex-grow-1">
+                    <strong>{{ a.producto }}</strong> — {{ a.mensaje }}
+                    {% if a.producto_upc %}<span class="text-muted small d-block">UPC {{ a.producto_upc }}</span>{% endif %}
+                </span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if puede_ver_operativo and lotes %}
+    <h6 class="mb-2"><i class="bi bi-box2 me-2"></i>Lotes de inventario</h6>
+    <div class="card mb-4">
+        <div class="list-group list-group-flush">
+            {% for l in lotes %}
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <span><strong>{{ l.lote }}</strong> <span class="text-muted small">— {{ l.producto.nombre }}</span></span>
+                <span class="text-muted small">Vence {{ l.fecha_vencimiento }} · {{ l.cantidad|floatformat:0 }} u.</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+{% endif %}
+{% endblock %}

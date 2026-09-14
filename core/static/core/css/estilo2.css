@@ -105,6 +105,21 @@ a:hover {
     margin-bottom: 4px;
 }
 
+.kpi-icono {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    flex-shrink: 0;
+}
+
+.kpi-icono-brote { background-color: rgba(82, 183, 136, 0.14); color: var(--brote); }
+.kpi-icono-danger { background-color: rgba(192, 57, 43, 0.12); color: #C0392B; }
+.kpi-icono-amber { background-color: rgba(192, 133, 0, 0.12); color: #C08500; }
+
 .card {
     transition: transform 0.15s ease, border-color 0.15s ease;
 }
@@ -345,6 +360,32 @@ a:hover {
     color: var(--bosque);
     margin-right: 10px;
     line-height: 1;
+}
+
+.topbar-buscador {
+    align-items: center;
+    gap: 8px;
+    background-color: var(--lino);
+    border: 1px solid rgba(27, 67, 50, 0.12);
+    border-radius: 999px;
+    padding: 7px 16px;
+    width: 100%;
+    max-width: 360px;
+    margin-right: 16px;
+    color: var(--musgo);
+}
+
+.topbar-buscador input {
+    border: none;
+    background: none;
+    outline: none;
+    font-size: 13.5px;
+    color: var(--tierra);
+    width: 100%;
+}
+
+.topbar-buscador input::placeholder {
+    color: var(--musgo);
 }
 
 .topbar-usuario {

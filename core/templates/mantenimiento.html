@@ -53,10 +53,10 @@
     <div class="card-body {% if productos_con_mape_alto %}p-0{% endif %}">
         {% if productos_con_mape_alto %}
             <table class="table table-sm mb-0">
-                <thead><tr><th>Producto</th><th>MAPE</th></tr></thead>
+                <thead><tr><th>UPC</th><th>Producto</th><th>MAPE</th></tr></thead>
                 <tbody>
-                    {% for nombre, mape in productos_con_mape_alto %}
-                    <tr><td>{{ nombre }}</td><td class="text-danger">{{ mape }}%</td></tr>
+                    {% for nombre, codigo_upc, mape in productos_con_mape_alto %}
+                    <tr><td class="text-muted small">{{ codigo_upc|default:"—" }}</td><td>{{ nombre }}</td><td class="text-danger">{{ mape }}%</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
