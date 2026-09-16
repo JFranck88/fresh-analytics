@@ -12,7 +12,9 @@ manual completa, pero cubre las rutas críticas.
 """
 
 from datetime import timedelta
+from io import StringIO
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -626,3 +628,44 @@ class BuscarGlobalJsonTests(TestCase):
         self.assertEqual(len(datos["productos"]), 1)
         self.assertEqual(datos["alertas"], [])
         self.assertEqual(datos["lotes"], [])
+
+
+class AsignarUpcDemoTests(TestCase):
+    """Comando de gestión que rellena codigo_upc con un código de demo
+    (departamento-categoría-correlativo) para que la demo no muestre UPC
+    en blanco, sin tocar los productos que ya tienen uno real."""
+
+    def setUp(self):
+        self.sin_upc = crear_producto(nombre="Producto sin UPC", upc=None)
+        self.con_upc = crear_producto(
+            nombre="Producto con UPC real", upc="7501234500000",
+            categoria=Producto.Categoria.CARNES,
+        )
+
+    def _correr(self, *args):
+        salida = StringIO()
+        call_command("asignar_upc_demo", *args, stdout=salida)
+        return salida.getvalue()
+
+    def test_asigna_codigo_con_formato_departamento_categoria_correlativo(self):
+        self._correr()
+        self.sin_upc.refresh_from_db()
+        self.assertEqual(self.sin_upc.codigo_upc, "0101100")
+
+    def test_no_toca_productos_que_ya_tienen_upc(self):
+        self._correr()
+        self.con_upc.refresh_from_db()
+        self.assertEqual(self.con_upc.codigo_upc, "7501234500000")
+
+    def test_forzar_reasigna_incluso_si_ya_tenia_upc(self):
+        self._correr("--forzar")
+        self.con_upc.refresh_from_db()
+        self.assertEqual(self.con_upc.codigo_upc, "0102100")
+
+    def test_correr_dos_veces_sin_forzar_no_cambia_nada(self):
+        self._correr()
+        self.sin_upc.refresh_from_db()
+        primer_codigo = self.sin_upc.codigo_upc
+        self._correr()
+        self.sin_upc.refresh_from_db()
+        self.assertEqual(self.sin_upc.codigo_upc, primer_codigo)

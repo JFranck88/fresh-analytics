@@ -107,7 +107,7 @@
                 labels: datos.labels,
                 datasets: [
                     {
-                        label: 'Límite superior (80% confianza)',
+                        label: 'Máximo esperado',
                         data: datos.superior,
                         borderColor: 'rgba(82,183,136,0.2)',
                         backgroundColor: 'rgba(82,183,136,0.12)',
@@ -116,7 +116,7 @@
                         borderWidth: 1,
                     },
                     {
-                        label: 'Límite inferior',
+                        label: 'Mínimo esperado',
                         data: datos.inferior,
                         borderColor: 'rgba(82,183,136,0.2)',
                         pointRadius: 0,
@@ -177,7 +177,7 @@
 <div class="card mb-4">
     <div class="card-body p-0">
         <table class="table table-striped mb-0">
-            <thead><tr><th>UPC</th><th>Producto</th><th>Fecha</th><th>Venta Estimada</th><th>Rango (80% confianza)</th><th>MAPE</th></tr></thead>
+            <thead><tr><th>UPC</th><th>Producto</th><th>Fecha</th><th>Venta Estimada</th><th>Rango esperado</th><th>Margen de error</th></tr></thead>
             <tbody>
                 {% for p in predicciones %}
                 <tr data-producto="{{ p.producto.id_producto }}"><td class="text-muted small">{{ p.producto.codigo_upc|default:"—" }}</td><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho|floatformat:0 }}</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
@@ -192,8 +192,8 @@
 {% if validacion_json %}
 <div class="card">
     <div class="card-body">
-        <h6 class="mb-1">Respaldo estadístico del modelo</h6>
-        <p class="text-muted small">Validado con múltiples periodos históricos, no una sola prueba.</p>
+        <h6 class="mb-1">Qué tan confiable es el modelo</h6>
+        <p class="text-muted small">Se comparó contra ventas reales de periodos pasados, no solo una prueba.</p>
         <canvas id="grafica-validacion" height="90"></canvas>
         <p id="meta-validacion" class="text-muted small mt-2 mb-0"></p>
     </div>
