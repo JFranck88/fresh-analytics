@@ -154,15 +154,24 @@
         });
     }
 
-    const parametros = new URLSearchParams(window.location.search);
-    const productoSolicitado = parametros.get('producto');
-    const productoInicial = (productoSolicitado && datosGrafica[productoSolicitado])
-        ? productoSolicitado
-        : Object.keys(datosGrafica)[0];
+    // La selección inicial (por ejemplo, al llegar desde el buscador con
+    // ?producto=X) necesita que la <table> de abajo YA exista en el DOM,
+    // porque filtrarTabla() busca sus filas con querySelectorAll. Este
+    // <script> corre ANTES de que el navegador llegue a esa tabla más
+    // abajo en el HTML, así que sin esperar a DOMContentLoaded la tabla
+    // todavía no tiene filas que ocultar - la gráfica se veía bien pero
+    // el listado de abajo seguía mostrando todos los productos mezclados.
+    document.addEventListener('DOMContentLoaded', function () {
+        const parametros = new URLSearchParams(window.location.search);
+        const productoSolicitado = parametros.get('producto');
+        const productoInicial = (productoSolicitado && datosGrafica[productoSolicitado])
+            ? productoSolicitado
+            : Object.keys(datosGrafica)[0];
 
-    if (productoInicial) {
-        seleccionarProducto(productoInicial);
-    }
+        if (productoInicial) {
+            seleccionarProducto(productoInicial);
+        }
+    });
 </script>
 
 <div class="card mb-4">
