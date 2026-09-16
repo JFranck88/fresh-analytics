@@ -12,9 +12,12 @@
                             <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
                             <span class="text-muted small d-block">{{ alerta.tipo }}{% if alerta.producto_upc %} · UPC {{ alerta.producto_upc }}{% endif %}</span>
                         </span>
-                        <a href="{% url 'marcar_alerta_leida' alerta.id %}" class="btn btn-outline-secondary btn-sm">
-                            Marcar como leída
-                        </a>
+                        <form method="post" action="{% url 'marcar_alerta_leida' alerta.id %}" class="mb-0">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-secondary btn-sm">
+                                Marcar como leída
+                            </button>
+                        </form>
                     </div>
                 {% endfor %}
             </div>

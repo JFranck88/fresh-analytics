@@ -9,6 +9,7 @@ from django.db.models.functions import TruncDate
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -195,6 +196,12 @@ def dashboard(request):
         "ventas_hoy": ventas_hoy,
         "merma_hoy": merma_hoy,
         "por_vencer_semana": sum(1 for a in alertas if a["tipo"] == "Vencimiento"),
+        # El KPI de "por vencer" cuenta alertas de tipo Vencimiento, que ya
+        # se generaron usando este mismo parámetro configurable (ver
+        # generar_alertas.py). La etiqueta antes decía "7 días" fijo, pero
+        # el valor real es el que esté configurado aquí (default 3) - se
+        # pasa al contexto para que la plantilla muestre el número correcto.
+        "dias_alerta_vencimiento": int(obtener_parametro("dias_alerta_vencimiento", 3)),
         "alertas": alertas,
         "mensajes_contexto": construir_contexto_inteligente(hoy),
         "modelo_al_dia": modelo_al_dia,
@@ -216,24 +223,33 @@ def buscar_global(request):
         request.user.rol in ("GERENTE", "COMPRADOR") or request.user.is_superuser_admin
     )
 
+    LIMITE_RESULTADOS = 15
+
     productos = []
     alertas = []
     lotes = []
+    productos_total = 0
+    alertas_total = 0
+    lotes_total = 0
 
     if consulta:
-        productos = list(
-            Producto.objects.filter(
-                Q(nombre__icontains=consulta) | Q(codigo_upc__icontains=consulta)
-            ).order_by("nombre")[:15]
-        )
+        productos_qs = Producto.objects.filter(
+            Q(nombre__icontains=consulta) | Q(codigo_upc__icontains=consulta)
+        ).order_by("nombre")
+        # Se cuenta el total ANTES de cortar a los primeros 15: antes esto se
+        # perdía en silencio (el usuario nunca sabía si había más productos
+        # que no le mostramos), ahora se lo decimos en la plantilla.
+        productos_total = productos_qs.count()
+        productos = list(productos_qs[:LIMITE_RESULTADOS])
 
         if puede_ver_operativo:
-            alertas_qs = (
+            alertas_qs_base = (
                 Alerta.objects.filter(leida=False)
                 .filter(Q(mensaje__icontains=consulta) | Q(producto__nombre__icontains=consulta))
                 .select_related("producto")
-                .order_by("tipo", "producto__nombre")[:15]
+                .order_by("tipo", "producto__nombre")
             )
+            alertas_total = alertas_qs_base.count()
             alertas = [
                 {
                     "producto": a.producto.nombre,
@@ -241,20 +257,26 @@ def buscar_global(request):
                     "mensaje": a.mensaje,
                     "nivel": NIVEL_POR_TIPO.get(a.tipo, "secondary"),
                 }
-                for a in alertas_qs
+                for a in alertas_qs_base[:LIMITE_RESULTADOS]
             ]
 
-            lotes = list(
+            lotes_qs = (
                 Inventario.objects.filter(lote__icontains=consulta)
                 .select_related("producto")
-                .order_by("fecha_vencimiento")[:15]
+                .order_by("fecha_vencimiento")
             )
+            lotes_total = lotes_qs.count()
+            lotes = list(lotes_qs[:LIMITE_RESULTADOS])
 
     contexto = {
         "consulta": consulta,
         "productos": productos,
         "alertas": alertas,
         "lotes": lotes,
+        "productos_total": productos_total,
+        "alertas_total": alertas_total,
+        "lotes_total": lotes_total,
+        "limite_resultados": LIMITE_RESULTADOS,
         "puede_ver_operativo": puede_ver_operativo,
         "hay_resultados": bool(productos or alertas or lotes),
     }
@@ -312,7 +334,14 @@ def listar_alertas(request):
 
 
 @rol_requerido("GERENTE", "COMPRADOR")
+@require_POST
 def marcar_alerta_leida(request, alerta_id):
+    # Antes era un <a href> normal, o sea un GET sin CSRF y sin ninguna
+    # protección: cualquier link (incluso un crawler o un <img> malicioso)
+    # podía marcar una alerta como leída y pisar usuario_lector/
+    # fecha_lectura sin que la persona dueña de la sesión hiciera nada.
+    # Ahora exige POST (con token CSRF, vía el <form> en listar_alertas.html),
+    # que es como Django espera que se hagan los cambios de estado.
     alerta = get_object_or_404(Alerta, id_alerta=alerta_id)
     alerta.leida = True
     alerta.usuario_lector = request.user
@@ -610,9 +639,10 @@ def editar_usuario(request, usuario_id):
 
 @rol_requerido("ADMINISTRADOR")
 def restablecer_password_usuario(request, usuario_id):
-    """Como no hay flujo de recuperación por correo (el backend de email es
-    de consola, ver settings.py), el Administrador es quien restablece la
-    contraseña de cualquier usuario que la haya olvidado."""
+    """El sistema no envía correo en ningún flujo (ver settings.py), así
+    que no hay recuperación de contraseña por email: el Administrador es
+    quien restablece la contraseña de cualquier usuario que la haya
+    olvidado."""
     usuario_editado = get_object_or_404(Usuario, id_usuario=usuario_id)
 
     if request.method == "POST":

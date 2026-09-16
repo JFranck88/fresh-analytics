@@ -32,6 +32,9 @@
             {% endfor %}
         </div>
     </div>
+    {% if productos_total > limite_resultados %}
+    <p class="text-muted small mt-n3 mb-4">Mostrando {{ limite_resultados }} de {{ productos_total }} productos — refina tu búsqueda para ver menos resultados.</p>
+    {% endif %}
     {% endif %}
 
     {% if puede_ver_operativo and alertas %}
@@ -49,6 +52,9 @@
             {% endfor %}
         </div>
     </div>
+    {% if alertas_total > limite_resultados %}
+    <p class="text-muted small mt-n3 mb-4">Mostrando {{ limite_resultados }} de {{ alertas_total }} alertas — refina tu búsqueda para ver menos resultados.</p>
+    {% endif %}
     {% endif %}
 
     {% if puede_ver_operativo and lotes %}
@@ -63,6 +69,9 @@
             {% endfor %}
         </div>
     </div>
+    {% if lotes_total > limite_resultados %}
+    <p class="text-muted small mt-n3 mb-4">Mostrando {{ limite_resultados }} de {{ lotes_total }} lotes — refina tu búsqueda para ver menos resultados.</p>
+    {% endif %}
     {% endif %}
 
 {% endif %}

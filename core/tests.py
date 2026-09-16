@@ -281,6 +281,16 @@ class AlertaFechaLecturaTests(TestCase):
         self.assertIsNotNone(self.alerta.fecha_lectura)
         self.assertEqual(self.alerta.usuario_lector, self.gerente)
 
+    def test_marcar_leida_por_get_no_esta_permitido(self):
+        """Antes era un <a href>: un simple GET (sin CSRF, sin intención
+        real del usuario) bastaba para marcar la alerta como leída. Ahora
+        solo se acepta POST, y un GET no debe cambiar nada."""
+        respuesta = self.client.get(reverse("marcar_alerta_leida", args=[self.alerta.id_alerta]))
+        self.assertEqual(respuesta.status_code, 405)
+        self.alerta.refresh_from_db()
+        self.assertFalse(self.alerta.leida)
+        self.assertIsNone(self.alerta.fecha_lectura)
+
 
 class ConfiguracionEdicionTests(TestCase):
     """Regresión del fix de esta sesión: editar un parámetro existente
@@ -526,3 +536,53 @@ class PaginacionTests(TestCase):
             reverse("historial_decisiones"), {"producto": producto.id_producto, "pagina": 2}
         )
         self.assertEqual(len(respuesta_pagina_2.context["filas"]), 5)
+
+
+class DashboardEtiquetaVencimientoTests(TestCase):
+    """El KPI "Por vencer" del dashboard decía "(7 días)" fijo en la
+    plantilla, pero el conteo real depende del parámetro configurable
+    dias_alerta_vencimiento (el mismo que usa generar_alertas.py, default
+    3). La etiqueta ahora debe mostrar el valor configurado de verdad."""
+
+    def test_dashboard_muestra_dias_configurados_en_vez_de_7_fijo(self):
+        comprador = crear_usuario("vencimiento.comprador@test.com", Usuario.Rol.COMPRADOR)
+        Configuracion.objects.create(
+            clave="dias_alerta_vencimiento", valor="5", descripcion="Días antes de vencer",
+        )
+        self.client.force_login(comprador)
+
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.context["dias_alerta_vencimiento"], 5)
+        self.assertContains(respuesta, "Por vencer (5 días)")
+        self.assertNotContains(respuesta, "Por vencer (7 días)")
+
+    def test_dashboard_usa_default_3_si_no_hay_parametro_configurado(self):
+        comprador = crear_usuario("vencimiento.default@test.com", Usuario.Rol.COMPRADOR)
+        self.client.force_login(comprador)
+
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.context["dias_alerta_vencimiento"], 3)
+
+
+class BuscarGlobalTests(TestCase):
+    """El buscador del sidebar cortaba los resultados en [:15] sin avisar
+    - si había 20 productos que coincidían, el usuario solo veía 15 y
+    nunca sabía que faltaban 5. Ahora se cuenta el total real y se avisa
+    en la página cuando el resultado se recortó."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("buscador.comprador@test.com", Usuario.Rol.COMPRADOR)
+        for i in range(20):
+            crear_producto(nombre=f"Producto buscable {i:02d}", upc=f"999000000{i:04d}")
+        self.client.force_login(self.comprador)
+
+    def test_avisa_cuando_hay_mas_productos_de_los_mostrados(self):
+        respuesta = self.client.get(reverse("buscar_global"), {"q": "buscable"})
+        self.assertEqual(len(respuesta.context["productos"]), 15)
+        self.assertEqual(respuesta.context["productos_total"], 20)
+        self.assertContains(respuesta, "Mostrando 15 de 20 productos")
+
+    def test_no_avisa_cuando_todos_los_resultados_caben(self):
+        respuesta = self.client.get(reverse("buscar_global"), {"q": "buscable 0"})
+        self.assertEqual(respuesta.context["productos_total"], 10)  # 00..09
+        self.assertNotContains(respuesta, "refina tu búsqueda para ver menos resultados")

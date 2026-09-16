@@ -126,9 +126,12 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+#
+# El sistema no envía correo en ningún flujo (el restablecimiento de
+# contraseña lo hace un Administrador manualmente desde Usuarios, no por
+# email - ver restablecer_password_usuario). "MAILERS" tampoco es una
+# opción real de Django (la que sí lee el framework es EMAIL_BACKEND), así
+# que este bloque nunca tuvo efecto - se elimina en vez de dejarlo como
+# configuración muerta que sugiere una función que no existe. Si en el
+# futuro se agrega envío de correo real, la opción correcta es:
+# EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
