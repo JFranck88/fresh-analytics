@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("buscar/", views.buscar_global, name="buscar_global"),
+    path("buscar/json/", views.buscar_global_json, name="buscar_global_json"),
     path("productos/buscar-json/", views.buscar_productos_json, name="buscar_productos_json"),
     path("mermas/registrar/", views.registrar_merma, name="registrar_merma"),
     path("mermas/", views.listar_mermas, name="listar_mermas"),

@@ -72,9 +72,10 @@
             <button type="button" class="topbar-toggle d-lg-none" id="btnAbrirSidebar" aria-label="Abrir menú">
                 <i class="bi bi-list"></i>
             </button>
-            <form method="get" action="{% url 'buscar_global' %}" class="topbar-buscador d-none d-md-flex">
+            <form method="get" action="{% url 'buscar_global' %}" class="topbar-buscador d-none d-md-flex" id="formBuscadorTopbar">
                 <i class="bi bi-search"></i>
-                <input type="search" name="q" placeholder="Buscar producto, lote, alerta…" value="{{ request.GET.q }}" autocomplete="off">
+                <input type="search" name="q" id="inputBuscadorTopbar" placeholder="Buscar producto, lote, alerta…" value="{{ request.GET.q }}" autocomplete="off">
+                <div id="resultadosBuscadorTopbar" class="topbar-buscador-resultados"></div>
             </form>
             <div class="flex-grow-1"></div>
             <div class="dropdown">
@@ -146,6 +147,115 @@
 
         overlay.addEventListener('click', function () {
             shell.classList.remove('sidebar-movil-abierta');
+        });
+    })();
+</script>
+<script>
+    // Buscador de la topbar: antes había que presionar Enter para ver
+    // cualquier resultado (era un <form> normal que recargaba /buscar/).
+    // Ahora sugiere en vivo mientras se escribe, con el mismo patrón de
+    // debounce que ya usan los mini-buscadores de producto (Registrar
+    // Merma / Historial de Decisiones), pero mostrando un resumen de
+    // productos, alertas y lotes en un dropdown bajo el campo.
+    (function () {
+        var form = document.getElementById('formBuscadorTopbar');
+        var input = document.getElementById('inputBuscadorTopbar');
+        var resultados = document.getElementById('resultadosBuscadorTopbar');
+        if (!form || !input || !resultados) return;
+
+        var urlJson = '{% url "buscar_global_json" %}';
+        var urlPagina = '{% url "buscar_global" %}';
+        var temporizador;
+        var consultaActual = '';
+
+        function ocultar() {
+            resultados.classList.remove('mostrando');
+            resultados.innerHTML = '';
+        }
+
+        function filaProducto(p) {
+            var div = document.createElement('a');
+            div.href = '{% url "listar_predicciones" %}?producto=' + encodeURIComponent(p.id);
+            div.className = 'topbar-buscador-item';
+            div.innerHTML = '<span class="topbar-buscador-item-upc">' + (p.upc || '—') + '</span>' +
+                '<span class="topbar-buscador-item-texto"><strong>' + p.nombre + '</strong>' +
+                ' <span class="text-muted small">— ' + p.categoria + '</span></span>';
+            return div;
+        }
+
+        function filaAlerta(a) {
+            var div = document.createElement('a');
+            div.href = '{% url "listar_alertas" %}';
+            div.className = 'topbar-buscador-item';
+            div.innerHTML = '<span class="badge bg-' + a.nivel + '">&nbsp;</span>' +
+                '<span class="topbar-buscador-item-texto"><strong>' + a.producto + '</strong> — ' + a.mensaje + '</span>';
+            return div;
+        }
+
+        function filaLote(l) {
+            var div = document.createElement('div');
+            div.className = 'topbar-buscador-item topbar-buscador-item-estatico';
+            div.innerHTML = '<span class="topbar-buscador-item-texto"><strong>' + l.lote + '</strong>' +
+                ' <span class="text-muted small">— ' + l.producto + ' · vence ' + l.fecha_vencimiento + '</span></span>';
+            return div;
+        }
+
+        function renderResultados(datos, consulta) {
+            resultados.innerHTML = '';
+
+            if (!datos.total) {
+                var vacio = document.createElement('div');
+                vacio.className = 'topbar-buscador-vacio';
+                vacio.textContent = 'Sin coincidencias para "' + consulta + '".';
+                resultados.appendChild(vacio);
+                resultados.classList.add('mostrando');
+                return;
+            }
+
+            datos.productos.forEach(function (p) { resultados.appendChild(filaProducto(p)); });
+            datos.alertas.forEach(function (a) { resultados.appendChild(filaAlerta(a)); });
+            datos.lotes.forEach(function (l) { resultados.appendChild(filaLote(l)); });
+
+            var verTodos = document.createElement('a');
+            verTodos.href = urlPagina + '?q=' + encodeURIComponent(consulta);
+            verTodos.className = 'topbar-buscador-ver-todos';
+            verTodos.textContent = 'Ver todos los resultados para "' + consulta + '"';
+            resultados.appendChild(verTodos);
+
+            resultados.classList.add('mostrando');
+        }
+
+        function buscar() {
+            var consulta = input.value.trim();
+            consultaActual = consulta;
+            if (!consulta) { ocultar(); return; }
+
+            fetch(urlJson + '?q=' + encodeURIComponent(consulta))
+                .then(function (r) { return r.json(); })
+                .then(function (datos) {
+                    // Si el usuario ya siguió escribiendo, esta respuesta
+                    // llegó tarde y ya no corresponde a lo que ve en pantalla.
+                    if (input.value.trim() !== consultaActual) return;
+                    renderResultados(datos, consulta);
+                })
+                .catch(function () { /* sin red: no rompemos el buscador, Enter sigue funcionando */ });
+        }
+
+        input.addEventListener('input', function () {
+            clearTimeout(temporizador);
+            temporizador = setTimeout(buscar, 200);
+        });
+
+        input.addEventListener('focus', function () {
+            if (input.value.trim() && resultados.innerHTML) resultados.classList.add('mostrando');
+        });
+
+        document.addEventListener('click', function (e) {
+            if (!form.contains(e.target)) ocultar();
+        });
+
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') ocultar();
         });
     })();
 </script>

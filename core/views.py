@@ -213,18 +213,13 @@ def dashboard(request):
     return render(request, "dashboard.html", contexto)
 
 
-@rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
-def buscar_global(request):
-    """Buscador del sidebar: productos (por nombre o código UPC), lotes de
-    inventario y alertas activas. Lotes y alertas quedan restringidos a los
-    mismos roles que ya los ven en el menú (Gerente/Comprador/superuser)."""
-    consulta = request.GET.get("q", "").strip()
-    puede_ver_operativo = (
-        request.user.rol in ("GERENTE", "COMPRADOR") or request.user.is_superuser_admin
-    )
-
-    LIMITE_RESULTADOS = 15
-
+def _buscar_global_resultados(consulta, puede_ver_operativo, limite):
+    """Lógica compartida entre `buscar_global` (página completa) y
+    `buscar_global_json` (sugerencias en vivo del buscador de la topbar) -
+    para no mantener el mismo filtrado de productos/alertas/lotes en dos
+    lugares distintos. `limite` corta cuántos resultados de cada tipo se
+    devuelven; el total real (antes de cortar) siempre se calcula completo,
+    para que quien llame pueda avisar si hay más de los que se muestran."""
     productos = []
     alertas = []
     lotes = []
@@ -236,11 +231,11 @@ def buscar_global(request):
         productos_qs = Producto.objects.filter(
             Q(nombre__icontains=consulta) | Q(codigo_upc__icontains=consulta)
         ).order_by("nombre")
-        # Se cuenta el total ANTES de cortar a los primeros 15: antes esto se
-        # perdía en silencio (el usuario nunca sabía si había más productos
-        # que no le mostramos), ahora se lo decimos en la plantilla.
+        # Se cuenta el total ANTES de cortar: antes esto se perdía en
+        # silencio (el usuario nunca sabía si había más de los que le
+        # mostramos), ahora se lo decimos en la plantilla.
         productos_total = productos_qs.count()
-        productos = list(productos_qs[:LIMITE_RESULTADOS])
+        productos = list(productos_qs[:limite])
 
         if puede_ver_operativo:
             alertas_qs_base = (
@@ -257,7 +252,7 @@ def buscar_global(request):
                     "mensaje": a.mensaje,
                     "nivel": NIVEL_POR_TIPO.get(a.tipo, "secondary"),
                 }
-                for a in alertas_qs_base[:LIMITE_RESULTADOS]
+                for a in alertas_qs_base[:limite]
             ]
 
             lotes_qs = (
@@ -266,21 +261,88 @@ def buscar_global(request):
                 .order_by("fecha_vencimiento")
             )
             lotes_total = lotes_qs.count()
-            lotes = list(lotes_qs[:LIMITE_RESULTADOS])
+            lotes = list(lotes_qs[:limite])
 
-    contexto = {
-        "consulta": consulta,
+    return {
         "productos": productos,
         "alertas": alertas,
         "lotes": lotes,
         "productos_total": productos_total,
         "alertas_total": alertas_total,
         "lotes_total": lotes_total,
+    }
+
+
+@rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
+def buscar_global(request):
+    """Buscador del sidebar: productos (por nombre o código UPC), lotes de
+    inventario y alertas activas. Lotes y alertas quedan restringidos a los
+    mismos roles que ya los ven en el menú (Gerente/Comprador/superuser)."""
+    consulta = request.GET.get("q", "").strip()
+    puede_ver_operativo = (
+        request.user.rol in ("GERENTE", "COMPRADOR") or request.user.is_superuser_admin
+    )
+    LIMITE_RESULTADOS = 15
+
+    resultados = _buscar_global_resultados(consulta, puede_ver_operativo, LIMITE_RESULTADOS)
+
+    contexto = {
+        "consulta": consulta,
         "limite_resultados": LIMITE_RESULTADOS,
         "puede_ver_operativo": puede_ver_operativo,
-        "hay_resultados": bool(productos or alertas or lotes),
+        "hay_resultados": bool(
+            resultados["productos"] or resultados["alertas"] or resultados["lotes"]
+        ),
+        **resultados,
     }
     return render(request, "buscar.html", contexto)
+
+
+@rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
+def buscar_global_json(request):
+    """Sugerencias en vivo para el buscador de la topbar (ver base.html):
+    antes ese buscador solo servía como formulario normal - había que
+    presionar Enter para ver cualquier resultado, igual que un buscador de
+    los años 2000. Ahora responde mientras se escribe, con el mismo mini-
+    buscador con debounce que ya se usaba para elegir producto en Registrar
+    Merma / Historial de Decisiones (ver buscar_productos_json), pero
+    combinando productos + alertas + lotes como la página completa de
+    búsqueda. Se recorta a un puñado de resultados por tipo (pensado para
+    un dropdown angosto, no para reemplazar /buscar/)."""
+    consulta = request.GET.get("q", "").strip()
+    puede_ver_operativo = (
+        request.user.rol in ("GERENTE", "COMPRADOR") or request.user.is_superuser_admin
+    )
+    LIMITE_SUGERENCIAS = 5
+
+    if not consulta:
+        return JsonResponse({"productos": [], "alertas": [], "lotes": [], "total": 0})
+
+    resultados = _buscar_global_resultados(consulta, puede_ver_operativo, LIMITE_SUGERENCIAS)
+
+    return JsonResponse({
+        "productos": [
+            {
+                "id": p.id_producto,
+                "nombre": p.nombre,
+                "upc": p.codigo_upc,
+                "categoria": p.get_categoria_display(),
+            }
+            for p in resultados["productos"]
+        ],
+        "alertas": resultados["alertas"],
+        "lotes": [
+            {
+                "lote": l.lote,
+                "producto": l.producto.nombre,
+                "fecha_vencimiento": l.fecha_vencimiento.strftime("%d/%m/%Y"),
+            }
+            for l in resultados["lotes"]
+        ],
+        "total": (
+            resultados["productos_total"] + resultados["alertas_total"] + resultados["lotes_total"]
+        ),
+    })
 
 
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")

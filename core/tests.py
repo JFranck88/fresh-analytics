@@ -586,3 +586,43 @@ class BuscarGlobalTests(TestCase):
         respuesta = self.client.get(reverse("buscar_global"), {"q": "buscable 0"})
         self.assertEqual(respuesta.context["productos_total"], 10)  # 00..09
         self.assertNotContains(respuesta, "refina tu búsqueda para ver menos resultados")
+
+
+class BuscarGlobalJsonTests(TestCase):
+    """El buscador de la topbar (base.html) antes solo funcionaba como un
+    <form> normal: había que presionar Enter para ver cualquier resultado.
+    Ahora consulta este endpoint mientras se escribe, para mostrar
+    sugerencias en un dropdown sin recargar la página."""
+
+    def setUp(self):
+        self.producto = crear_producto(nombre="Yogur natural", upc="7501111111111")
+        self.comprador = crear_usuario("json.comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.administrador = crear_usuario("json.admin@test.com", Usuario.Rol.ADMINISTRADOR)
+        Alerta.objects.create(
+            producto=self.producto, tipo=Alerta.Tipo.STOCK_BAJO, mensaje="Stock bajo de yogur",
+        )
+
+    def test_sin_consulta_devuelve_todo_vacio(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("buscar_global_json"))
+        datos = respuesta.json()
+        self.assertEqual(datos["total"], 0)
+        self.assertEqual(datos["productos"], [])
+
+    def test_comprador_ve_productos_y_alertas(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("buscar_global_json"), {"q": "yogur"})
+        datos = respuesta.json()
+        self.assertEqual(len(datos["productos"]), 1)
+        self.assertEqual(datos["productos"][0]["nombre"], "Yogur natural")
+        self.assertEqual(len(datos["alertas"]), 1)
+
+    def test_administrador_no_ve_alertas_ni_lotes(self):
+        """Misma regla de visibilidad que la página completa /buscar/:
+        Administrador no ve lo operativo de Gerente/Comprador."""
+        self.client.force_login(self.administrador)
+        respuesta = self.client.get(reverse("buscar_global_json"), {"q": "yogur"})
+        datos = respuesta.json()
+        self.assertEqual(len(datos["productos"]), 1)
+        self.assertEqual(datos["alertas"], [])
+        self.assertEqual(datos["lotes"], [])

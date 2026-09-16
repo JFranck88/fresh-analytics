@@ -363,6 +363,7 @@ a:hover {
 }
 
 .topbar-buscador {
+    position: relative;
     align-items: center;
     gap: 8px;
     background-color: var(--lino);
@@ -386,6 +387,80 @@ a:hover {
 
 .topbar-buscador input::placeholder {
     color: var(--musgo);
+}
+
+/* Dropdown de sugerencias en vivo del buscador de la topbar (ver el
+   script al final de base.html) - oculto por defecto, se muestra
+   agregando la clase "mostrando" cuando hay una respuesta que dibujar. */
+.topbar-buscador-resultados {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid rgba(27, 67, 50, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 12px 28px rgba(27, 67, 50, 0.14);
+    max-height: 360px;
+    overflow-y: auto;
+    z-index: 1050;
+    padding: 6px;
+}
+
+.topbar-buscador-resultados.mostrando {
+    display: block;
+}
+
+.topbar-buscador-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    color: var(--tierra);
+    text-decoration: none;
+    font-size: 13.5px;
+}
+
+a.topbar-buscador-item:hover {
+    background-color: var(--lino);
+}
+
+.topbar-buscador-item-estatico {
+    cursor: default;
+}
+
+.topbar-buscador-item-upc {
+    color: var(--musgo);
+    font-size: 12px;
+    min-width: 90px;
+}
+
+.topbar-buscador-item-texto {
+    flex-grow: 1;
+}
+
+.topbar-buscador-vacio {
+    padding: 10px;
+    color: var(--musgo);
+    font-size: 13px;
+}
+
+.topbar-buscador-ver-todos {
+    display: block;
+    text-align: center;
+    padding: 10px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(27, 67, 50, 0.08);
+    color: var(--bosque);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.topbar-buscador-ver-todos:hover {
+    text-decoration: underline;
 }
 
 .topbar-usuario {
