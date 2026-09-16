@@ -20,4 +20,31 @@
         </table>
     </div>
 </div>
+
+{% if mermas.paginator.num_pages > 1 %}
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <span class="text-muted small">Mostrando {{ mermas.start_index }}–{{ mermas.end_index }} de {{ mermas.paginator.count }} registros</span>
+    <nav aria-label="Paginación de mermas">
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item {% if not mermas.has_previous %}disabled{% endif %}">
+                {% if mermas.has_previous %}
+                <a class="page-link" href="?pagina={{ mermas.previous_page_number }}">Anterior</a>
+                {% else %}
+                <span class="page-link">Anterior</span>
+                {% endif %}
+            </li>
+            <li class="page-item disabled"><span class="page-link">Página {{ mermas.number }} de {{ mermas.paginator.num_pages }}</span></li>
+            <li class="page-item {% if not mermas.has_next %}disabled{% endif %}">
+                {% if mermas.has_next %}
+                <a class="page-link" href="?pagina={{ mermas.next_page_number }}">Siguiente</a>
+                {% else %}
+                <span class="page-link">Siguiente</span>
+                {% endif %}
+            </li>
+        </ul>
+    </nav>
+</div>
+{% elif mermas.paginator.count %}
+<p class="text-muted small mt-2 mb-0">{{ mermas.paginator.count }} registro{{ mermas.paginator.count|pluralize }} en total.</p>
+{% endif %}
 {% endblock %}

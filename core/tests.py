@@ -11,6 +11,8 @@ Configuración- se comporte como se espera. No sustituye una revisión
 manual completa, pero cubre las rutas críticas.
 """
 
+from datetime import timedelta
+
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -454,3 +456,49 @@ class PaginasDeErrorTests(TestCase):
         self.assertEqual(respuesta.status_code, 403)
         self.assertTemplateUsed(respuesta, "403.html")
         self.assertContains(respuesta, "Acceso no autorizado", status_code=403)
+
+
+class PaginacionTests(TestCase):
+    """Mermas e Historial de Decisiones antes se cortaban en silencio con
+    [:100]/[:200] sin avisarle al usuario; ahora usan paginación real de
+    Django. Verifica que exista una segunda página con el resto de los
+    registros, y que los filtros de Historial de Decisiones sobrevivan
+    al cambiar de página."""
+
+    def test_listar_mermas_pagina_correctamente(self):
+        comprador = crear_usuario("paginacion.comprador@test.com", Usuario.Rol.COMPRADOR)
+        producto = crear_producto()
+        for i in range(30):
+            Merma.objects.create(
+                producto=producto, fecha=timezone.localdate() - timedelta(days=i),
+                cantidad=1, motivo=Merma.Motivo.VENCIMIENTO, costo_perdida=1,
+            )
+        self.client.force_login(comprador)
+
+        respuesta = self.client.get(reverse("listar_mermas"))
+        self.assertEqual(len(respuesta.context["mermas"]), 25)
+        self.assertEqual(respuesta.context["mermas"].paginator.num_pages, 2)
+
+        respuesta_pagina_2 = self.client.get(reverse("listar_mermas"), {"pagina": 2})
+        self.assertEqual(len(respuesta_pagina_2.context["mermas"]), 5)
+
+    def test_historial_decisiones_pagina_y_conserva_filtros(self):
+        gerente = crear_usuario("paginacion.gerente@test.com", Usuario.Rol.GERENTE)
+        producto = crear_producto()
+        hoy = timezone.localdate()
+        for i in range(30):
+            DecisionHistorial.objects.create(
+                producto=producto, usuario=gerente,
+                fecha_prediccion=hoy - timedelta(days=i),
+                cantidad_sugerida=10, cantidad_ajustada=12,
+            )
+        self.client.force_login(gerente)
+
+        respuesta = self.client.get(reverse("historial_decisiones"), {"producto": producto.id_producto})
+        self.assertEqual(len(respuesta.context["filas"]), 25)
+        self.assertEqual(respuesta.context["pagina"].paginator.num_pages, 2)
+
+        respuesta_pagina_2 = self.client.get(
+            reverse("historial_decisiones"), {"producto": producto.id_producto, "pagina": 2}
+        )
+        self.assertEqual(len(respuesta_pagina_2.context["filas"]), 5)

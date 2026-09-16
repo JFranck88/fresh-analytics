@@ -3,6 +3,7 @@ import json
 from datetime import timedelta
 
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.db.models import Sum, F, Q, Avg, DecimalField
 from django.db.models.functions import TruncDate
 from django.http import FileResponse, JsonResponse
@@ -28,6 +29,8 @@ NIVEL_POR_TIPO = {
 }
 
 DIAS_QUINCENA = [14, 15, 16, 29, 30, 31, 1]
+
+REGISTROS_POR_PAGINA = 25
 
 DIAS_SEMANA_ES = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
@@ -336,7 +339,9 @@ def registrar_merma(request):
 
 @rol_requerido("GERENTE", "COMPRADOR")
 def listar_mermas(request):
-    mermas = Merma.objects.select_related("producto").order_by("-fecha")[:100]
+    mermas_qs = Merma.objects.select_related("producto").order_by("-fecha")
+    paginador = Paginator(mermas_qs, REGISTROS_POR_PAGINA)
+    mermas = paginador.get_page(request.GET.get("pagina"))
     return render(request, "listar_mermas.html", {"mermas": mermas})
 
 
@@ -475,8 +480,11 @@ def historial_decisiones(request):
     if hasta:
         historial_qs = historial_qs.filter(fecha_decision__date__lte=hasta)
 
+    paginador = Paginator(historial_qs, REGISTROS_POR_PAGINA)
+    pagina = paginador.get_page(request.GET.get("pagina"))
+
     filas = []
-    for h in historial_qs[:200]:
+    for h in pagina.object_list:
         mape = Prediccion.objects.filter(
             producto=h.producto, fecha_prediccion=h.fecha_prediccion
         ).aggregate(promedio=Avg("precision_modelo"))["promedio"]
@@ -494,6 +502,7 @@ def historial_decisiones(request):
 
     contexto = {
         "filas": filas,
+        "pagina": pagina,
         "es_gerente": es_gerente,
         "producto_id": producto_id,
         "desde": desde,
