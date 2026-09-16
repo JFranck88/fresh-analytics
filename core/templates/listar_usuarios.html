@@ -21,7 +21,7 @@
                             <span class="badge bg-secondary">Inactivo</span>
                         {% endif %}
                     </td>
-                    <td>{{ u.ultimo_acceso|default:"Nunca" }}</td>
+                    <td>{{ u.last_login|date:"d/m/Y H:i"|default:"Nunca" }}</td>
                     <td class="text-end">
                         <a href="{% url 'editar_usuario' u.id_usuario %}" class="btn btn-outline-secondary btn-sm" title="Editar">
                             <i class="bi bi-pencil"></i>

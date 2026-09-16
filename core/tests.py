@@ -70,6 +70,30 @@ class AutenticacionTests(TestCase):
         self.assertEqual(respuesta.status_code, 302)
         self.assertIn(reverse("login"), respuesta.url)
 
+    def test_login_actualiza_last_login_y_se_ve_en_listar_usuarios(self):
+        """Usuario no guarda un 'ultimo_acceso' propio (ver migración 0007):
+        usa el last_login que Django ya trae y actualiza solo en cada login.
+        Antes había un campo separado que nadie escribía nunca y la pantalla
+        de Usuarios siempre mostraba 'Nunca', aunque la cuenta sí hubiera
+        iniciado sesión."""
+        self.assertIsNone(self.comprador.last_login)
+        self.client.post(reverse("login"), {
+            "username": "comprador@test.com", "password": "Clave-Segura-123",
+        })
+        self.comprador.refresh_from_db()
+        self.assertIsNotNone(self.comprador.last_login)
+
+        # force_login (usado en el resto de la suite) no dispara la señal
+        # user_logged_in, así que aquí se inicia sesión real también para
+        # el administrador, y así confirmar que la pantalla no muestra
+        # "Nunca" para ninguna de las dos cuentas que sí accedieron.
+        administrador = crear_usuario("admin.listar@test.com", Usuario.Rol.ADMINISTRADOR)
+        self.client.post(reverse("login"), {
+            "username": "admin.listar@test.com", "password": "Clave-Segura-123",
+        })
+        respuesta = self.client.get(reverse("listar_usuarios"))
+        self.assertNotContains(respuesta, "Nunca")
+
 
 class ControlDeAccesoPorRolTests(TestCase):
     """Cada rol debe ver solo lo que le corresponde: Comprador sus módulos

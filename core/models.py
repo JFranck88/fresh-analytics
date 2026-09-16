@@ -184,7 +184,11 @@ class Usuario(AbstractBaseUser):
     # Mismo nombre de columna del ER (contrasena_hash); Django la maneja
     # internamente vía self.password, set_password() y check_password().
     password = models.CharField(max_length=255, db_column="contrasena_hash")
-    ultimo_acceso = models.DateTimeField(null=True, blank=True)
+    # No se guarda un "ultimo_acceso" propio: AbstractBaseUser ya trae
+    # last_login, y Django lo actualiza solo en cada login exitoso
+    # (senal user_logged_in, conectada automaticamente por
+    # django.contrib.auth). Un campo separado que nadie escribe nunca
+    # es el mismo tipo de bug silencioso que fecha_lectura en Alerta.
 
     # Campos técnicos mínimos que Django exige para el login (no son
     # parte del negocio, son requisito del framework):
