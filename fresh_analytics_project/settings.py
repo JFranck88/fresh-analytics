@@ -69,8 +69,18 @@ WSGI_APPLICATION = 'fresh_analytics_project.wsgi.application'
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 if config("DATABASE_URL", default=None):
+    # OJO: dj_database_url.config() sin argumentos lee la variable de
+    # entorno DATABASE_URL directo del proceso (os.environ), NO del
+    # archivo .env que decouple sabe leer. En Render esto nunca fue un
+    # problema porque ahí DATABASE_URL sí es una variable de entorno
+    # real del proceso. Pero si alguien agrega DATABASE_URL solo al
+    # .env local (para conectarse puntualmente a la base de producción
+    # desde su máquina), dj_database_url no la encuentra ahí y termina
+    # armando una conexión "dummy" sin motor, con un error confuso
+    # ("Please supply the ENGINE value"). Por eso se le pasa
+    # explícitamente el valor ya leído por decouple con dj_database_url.parse().
     DATABASES = {
-        "default": dj_database_url.config(conn_max_age=600)
+        "default": dj_database_url.parse(config("DATABASE_URL"), conn_max_age=600)
     }
 else:
     DATABASES = {
