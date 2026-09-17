@@ -99,28 +99,38 @@ class Command(BaseCommand):
                 ))
 
                 if random.random() < 0.35:
-                    cantidad_merma = round(cantidad_dia * random.uniform(0.005, 0.03), 1)
-                    if cantidad_merma > 0:
-                        if producto.categoria in ("FRUTAS", "VERDURAS"):
-                            if producto.nombre == "Tomate de riñón":
-                                pesos = [0.25, 0.65, 0.10]
-                            else:
-                                pesos = [0.55, 0.35, 0.10]
-                            motivo = random.choices(
-                                ["DANO", "VENCIMIENTO", "OTRO"], weights=pesos
-                            )[0]
+                    # Cantidad de la merma: igual que Venta.cantidad e
+                    # Inventario.cantidad (ver más abajo), siempre un
+                    # número ENTERO de unidades - perder "0,5 yogures" o
+                    # "0,7 panes" no tiene sentido para productos que se
+                    # cuentan por pieza (reportado por Francisco al ver
+                    # decimales en Historial de Mermas). Antes se
+                    # redondeaba a 1 decimal, lo que producía justo esos
+                    # valores fraccionarios. Como el dado de arriba ya
+                    # decide SI hay merma ese día, una vez que ocurre se
+                    # garantiza al menos 1 unidad completa (en vez de que
+                    # el redondeo la deje en 0 y se pierda el registro).
+                    cantidad_merma = max(1, round(cantidad_dia * random.uniform(0.005, 0.03)))
+                    if producto.categoria in ("FRUTAS", "VERDURAS"):
+                        if producto.nombre == "Tomate de riñón":
+                            pesos = [0.25, 0.65, 0.10]
                         else:
-                            motivo = random.choices(
-                                ["VENCIMIENTO", "OTRO", "ROBO"], weights=[0.75, 0.15, 0.10]
-                            )[0]
+                            pesos = [0.55, 0.35, 0.10]
+                        motivo = random.choices(
+                            ["DANO", "VENCIMIENTO", "OTRO"], weights=pesos
+                        )[0]
+                    else:
+                        motivo = random.choices(
+                            ["VENCIMIENTO", "OTRO", "ROBO"], weights=[0.75, 0.15, 0.10]
+                        )[0]
 
-                        mermas_bulk.append(Merma(
-                            producto=producto, fecha=fecha, cantidad=cantidad_merma,
-                            motivo=motivo,
-                            costo_perdida=round(
-                                float(cantidad_merma) * float(producto.precio_compra), 2
-                            ),
-                        ))
+                    mermas_bulk.append(Merma(
+                        producto=producto, fecha=fecha, cantidad=cantidad_merma,
+                        motivo=motivo,
+                        costo_perdida=round(
+                            float(cantidad_merma) * float(producto.precio_compra), 2
+                        ),
+                    ))
 
             if dia_num % 3 == 0:
                 for producto in productos:
