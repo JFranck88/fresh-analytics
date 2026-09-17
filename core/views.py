@@ -21,8 +21,8 @@ from .forms import (
     EditarUsuarioForm, RestablecerPasswordForm,
 )
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta, DecisionHistorial
-from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_hoy
-from .riesgo_descomposicion import calcular_riesgo_lote
+from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_por_dia
+from .riesgo_descomposicion import calcular_riesgo_lote, primer_dia_que_sube_de_nivel
 
 NIVEL_POR_TIPO = {
     "VENCIMIENTO": "danger",
@@ -449,7 +449,10 @@ def riesgo_descomposicion(request):
     # ni ninguna otra lógica de vencimiento ya existente - es información
     # extra, en su propia pantalla.
     hoy = timezone.localdate()
-    temp_max, humedad_promedio = pronostico_temperatura_humedad_hoy()
+    clima_por_dia = pronostico_temperatura_humedad_por_dia()
+    clima_hoy = clima_por_dia.get(hoy, {})
+    temp_max = clima_hoy.get("temp_max")
+    humedad_promedio = clima_hoy.get("humedad_promedio")
 
     lotes_qs = (
         Inventario.objects.filter(
@@ -457,6 +460,17 @@ def riesgo_descomposicion(request):
                 Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS,
             ],
             cantidad__gt=0,
+            # Solo lotes que TODAVÍA no llegan a su fecha_vencimiento
+            # (estimada como fecha_ingreso + vida_util_dias). Sin este
+            # filtro, los 2 años de historial sintético dejan miles de
+            # lotes viejísimos con cantidad > 0 (el generador de datos de
+            # prueba nunca "consume" el inventario) - salían lotes con
+            # cientos de días en exhibición, algo imposible en la vida
+            # real. Esta pantalla es para anticiparse ANTES de que un
+            # lote llegue a su fecha, no para auditar lotes que ya la
+            # pasaron hace mucho - de eso ya se encarga la alerta de
+            # Vencimiento existente (generar_alertas.py).
+            fecha_vencimiento__gte=hoy,
         )
         .select_related("producto")
         .order_by("fecha_ingreso")
@@ -466,6 +480,35 @@ def riesgo_descomposicion(request):
     for lote in lotes_qs:
         dias_en_exhibicion = (hoy - lote.fecha_ingreso).days
         riesgo = calcular_riesgo_lote(dias_en_exhibicion, temp_max, humedad_promedio)
+
+        # Proyección a los próximos días del pronóstico (petición de
+        # Francisco): en vez de una tabla día por día, solo un aviso
+        # corto para cuando el riesgo vaya a SUBIR de nivel respecto a
+        # hoy. Se proyecta como máximo hasta un día antes de que el
+        # propio lote llegue a su fecha_vencimiento - más allá de eso ya
+        # no debería seguir "en exhibición".
+        dias_proyectados = []
+        for fecha_futura in sorted(clima_por_dia):
+            if fecha_futura <= hoy or fecha_futura >= lote.fecha_vencimiento:
+                continue
+            offset = (fecha_futura - hoy).days
+            datos_dia = clima_por_dia[fecha_futura]
+            riesgo_futuro = calcular_riesgo_lote(
+                dias_en_exhibicion + offset,
+                datos_dia.get("temp_max"),
+                datos_dia.get("humedad_promedio"),
+            )
+            dias_proyectados.append({"fecha": fecha_futura, "nivel": riesgo_futuro["nivel"]})
+
+        dia_que_sube = primer_dia_que_sube_de_nivel(riesgo["nivel"], dias_proyectados)
+        aviso_proyeccion = None
+        if dia_que_sube:
+            aviso_proyeccion = (
+                f"Sube a {dia_que_sube['nivel']} el "
+                f"{DIAS_SEMANA_ES[dia_que_sube['fecha'].weekday()]} "
+                f"({dia_que_sube['fecha'].strftime('%d/%m')})"
+            )
+
         lotes.append({
             "lote": lote.lote,
             "producto": lote.producto.nombre,
@@ -474,6 +517,7 @@ def riesgo_descomposicion(request):
             "cantidad": lote.cantidad,
             "fecha_ingreso": lote.fecha_ingreso,
             "dias_en_exhibicion": dias_en_exhibicion,
+            "aviso_proyeccion": aviso_proyeccion,
             **riesgo,
         })
 

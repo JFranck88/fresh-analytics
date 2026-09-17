@@ -24,7 +24,7 @@ from .models import (
     Producto, Inventario, Merma, Prediccion, Usuario,
     Alerta, Configuracion, DecisionHistorial,
 )
-from .riesgo_descomposicion import calcular_riesgo_lote
+from .riesgo_descomposicion import calcular_riesgo_lote, primer_dia_que_sube_de_nivel
 
 
 def crear_usuario(correo, rol, password="Clave-Segura-123"):
@@ -801,6 +801,37 @@ class CalcularRiesgoLoteTests(TestCase):
         self.assertEqual(riesgo["factores"]["humedad"], 0)
 
 
+class PrimerDiaQueSubeDeNivelTests(TestCase):
+    """Pruebas puras del aviso de proyección (petición de Francisco:
+    avisar solo cuando el riesgo va a subir de nivel, sin mostrar una
+    tabla completa día por día)."""
+
+    def test_encuentra_el_primer_dia_que_sube(self):
+        dias = [
+            {"fecha": "lunes", "nivel": "BAJO"},
+            {"fecha": "martes", "nivel": "MEDIO"},
+            {"fecha": "miércoles", "nivel": "ALTO"},
+        ]
+        resultado = primer_dia_que_sube_de_nivel("BAJO", dias)
+        self.assertEqual(resultado["fecha"], "martes")
+
+    def test_ninguno_sube_devuelve_none(self):
+        dias = [{"fecha": "martes", "nivel": "BAJO"}, {"fecha": "miércoles", "nivel": "BAJO"}]
+        self.assertIsNone(primer_dia_que_sube_de_nivel("MEDIO", dias))
+
+    def test_bajar_de_nivel_no_cuenta_como_subida(self):
+        dias = [{"fecha": "martes", "nivel": "BAJO"}]
+        self.assertIsNone(primer_dia_que_sube_de_nivel("MEDIO", dias))
+
+    def test_ya_en_alto_nunca_avisa(self):
+        # Un lote que ya está en el nivel más alto no puede "subir más".
+        dias = [{"fecha": "martes", "nivel": "ALTO"}]
+        self.assertIsNone(primer_dia_que_sube_de_nivel("ALTO", dias))
+
+    def test_lista_vacia_devuelve_none(self):
+        self.assertIsNone(primer_dia_que_sube_de_nivel("BAJO", []))
+
+
 class RiesgoDescomposicionVistaTests(TestCase):
     """RF/cambio estructural aditivo: la pantalla de riesgo climático solo
     debe mostrar lotes de Frutas y Verduras (las categorías sin fecha de
@@ -829,20 +860,37 @@ class RiesgoDescomposicionVistaTests(TestCase):
 
         self.client.force_login(self.comprador)
 
-    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_solo_incluye_frutas_y_verduras(self, _mock_clima):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
         productos_mostrados = [l["producto"] for l in respuesta.context["lotes"]]
         self.assertIn("Manzana roja", productos_mostrados)
         self.assertNotIn("Leche entera 1L", productos_mostrados)
 
-    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_no_incluye_lotes_ya_vencidos(self, _mock_clima):
+        # Bug real reportado por Francisco: sin este filtro, lotes viejísimos
+        # del historial sintético (fecha_ingreso de hace años, nunca
+        # "consumidos") aparecían con cientos de días en exhibición - algo
+        # imposible en la vida real. Un lote cuya fecha_vencimiento ya pasó
+        # no debe aparecer aquí (ya lo cubre la alerta de Vencimiento).
+        hoy = timezone.localdate()
+        Inventario.objects.create(
+            producto=self.manzana, fecha_ingreso=hoy - timedelta(days=744),
+            fecha_vencimiento=hoy - timedelta(days=729), cantidad=80, lote="L-VIEJO",
+        )
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        lotes_mostrados = [l["lote"] for l in respuesta.context["lotes"]]
+        self.assertIn("L1", lotes_mostrados)
+        self.assertNotIn("L-VIEJO", lotes_mostrados)
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_calcula_dias_en_exhibicion_desde_fecha_ingreso(self, _mock_clima):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
         fila = respuesta.context["lotes"][0]
         self.assertEqual(fila["dias_en_exhibicion"], 6)
 
-    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_sin_clima_disponible_sigue_funcionando(self, _mock_clima):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
         self.assertEqual(respuesta.status_code, 200)
@@ -851,14 +899,58 @@ class RiesgoDescomposicionVistaTests(TestCase):
         # PUNTOS_POR_DIAS_EXHIBICION (45) -> nivel MEDIO.
         self.assertEqual(respuesta.context["lotes"][0]["nivel"], "MEDIO")
 
-    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(32.0, 85.0))
-    def test_con_clima_disponible_sube_el_riesgo(self, _mock_clima):
+    @patch("core.views.pronostico_temperatura_humedad_por_dia")
+    def test_con_clima_disponible_sube_el_riesgo(self, mock_clima):
+        hoy = timezone.localdate()
+        mock_clima.return_value = {hoy: {"temp_max": 32.0, "humedad_promedio": 85.0}}
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
         self.assertTrue(respuesta.context["clima_disponible"])
         self.assertEqual(respuesta.context["lotes"][0]["nivel"], "ALTO")
 
-    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_no_afecta_fecha_vencimiento_del_inventario(self, _mock_clima):
         self.client.get(reverse("riesgo_descomposicion"))
         lote = Inventario.objects.get(lote="L1")
         self.assertEqual(lote.fecha_vencimiento, timezone.localdate() + timedelta(days=2))
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia")
+    def test_avisa_cuando_el_riesgo_va_a_subir_de_nivel(self, mock_clima):
+        # Petición explícita de Francisco: en vez de una tabla día por
+        # día, un aviso corto cuando un lote va a subir de nivel pronto.
+        # L1 lleva 6 días en exhibición (ya en MEDIO sin clima, ver
+        # test_sin_clima_disponible_sigue_funcionando) y su fecha de
+        # vencimiento es en 2 días - se simula un mañana muy caluroso y
+        # húmedo para que sí alcance a subir a ALTO antes de esa fecha.
+        hoy = timezone.localdate()
+        mañana = hoy + timedelta(days=1)
+        mock_clima.return_value = {
+            hoy: {"temp_max": None, "humedad_promedio": None},
+            mañana: {"temp_max": 35.0, "humedad_promedio": 90.0},
+        }
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        fila = respuesta.context["lotes"][0]
+        self.assertEqual(fila["nivel"], "MEDIO")
+        self.assertIsNotNone(fila["aviso_proyeccion"])
+        self.assertIn("ALTO", fila["aviso_proyeccion"])
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia")
+    def test_no_avisa_si_no_hay_ningun_dia_que_suba_de_nivel(self, mock_clima):
+        hoy = timezone.localdate()
+        mañana = hoy + timedelta(days=1)
+        # Clima templado de mañana: no alcanza a mover el nivel de MEDIO.
+        mock_clima.return_value = {mañana: {"temp_max": 18.0, "humedad_promedio": 40.0}}
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        fila = respuesta.context["lotes"][0]
+        self.assertIsNone(fila["aviso_proyeccion"])
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia")
+    def test_proyeccion_no_pasa_de_la_fecha_de_vencimiento_del_lote(self, mock_clima):
+        # L1 vence en 2 días - un pronóstico de calor extremo para dentro
+        # de 5 días (ya fuera de la vida del lote) no debe generar aviso,
+        # porque para entonces el lote ya no debería seguir en exhibición.
+        hoy = timezone.localdate()
+        dia_lejano = hoy + timedelta(days=5)
+        mock_clima.return_value = {dia_lejano: {"temp_max": 40.0, "humedad_promedio": 95.0}}
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        fila = respuesta.context["lotes"][0]
+        self.assertIsNone(fila["aviso_proyeccion"])

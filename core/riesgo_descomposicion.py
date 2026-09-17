@@ -53,6 +53,11 @@ PUNTAJE_MAXIMO = 100
 UMBRAL_ALTO = 61
 UMBRAL_MEDIO = 31
 
+# Orden de menor a mayor riesgo, para poder comparar "¿este nivel es peor
+# que aquel?" - usado por la proyección de los próximos días (ver
+# primer_dia_que_sube_de_nivel más abajo).
+ORDEN_NIVELES = ("BAJO", "MEDIO", "ALTO")
+
 
 def _puntos_por_umbral(valor, tabla_umbrales):
     """Recorre la tabla (ordenada de mayor a menor umbral) y devuelve los
@@ -112,3 +117,29 @@ def calcular_riesgo_lote(dias_en_exhibicion, temp_max=None, humedad_promedio=Non
             "humedad": puntos_humedad,
         },
     }
+
+
+def primer_dia_que_sube_de_nivel(nivel_hoy, dias_proyectados):
+    """
+    Recorre los próximos días (ya ordenados por fecha) buscando el primer
+    día en el que el riesgo sube de nivel respecto a HOY - por ejemplo, un
+    lote que hoy está en BAJO pero mañana pasa a MEDIO o ALTO por el calor
+    pronosticado. Pensado para el aviso corto "Sube a ALTO el jueves" en
+    vez de mostrar una tabla completa día por día (decisión de Francisco:
+    algo simple de leer, no una tabla más ancha).
+
+    nivel_hoy: "BAJO"/"MEDIO"/"ALTO", el nivel ya calculado para hoy.
+    dias_proyectados: lista de dicts, cada uno con al menos "fecha" y
+        "nivel" (el resultado de calcular_riesgo_lote para ese día),
+        ya en orden cronológico.
+
+    Devuelve el primer dict de dias_proyectados cuyo nivel es peor que
+    nivel_hoy, o None si ninguno sube (se mantiene igual o mejora).
+    Un lote que YA está en ALTO nunca puede "subir más", así que siempre
+    devuelve None en ese caso.
+    """
+    rango_hoy = ORDEN_NIVELES.index(nivel_hoy)
+    for dia in dias_proyectados:
+        if ORDEN_NIVELES.index(dia["nivel"]) > rango_hoy:
+            return dia
+    return None
