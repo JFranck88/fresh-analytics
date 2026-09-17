@@ -19,16 +19,41 @@ implementar aquí, así que el cálculo es intencionalmente simple: cada
 variable suma "puntos de riesgo" en una tabla de umbrales, y el total se
 traduce a un semáforo (bajo/medio/alto) fácil de leer para el Comprador
 o el Gerente.
+
+Corrección de diseño (reportada por Francisco al ver la pantalla en
+producción): la primera versión de este cálculo usaba los DÍAS
+ABSOLUTOS en exhibición para puntuar. El problema es que
+Producto.vida_util_dias varía mucho entre frutas/verduras (5 a 15 días
+en el catálogo) y la vista ya descarta los lotes cuya fecha_vencimiento
+ya pasó - así que casi cualquier lote que sigue vivo en pantalla tiene
+6 o más días en exhibición, sin importar si ese producto dura 5 días o
+15. Resultado: casi todos los lotes quedaban con el mismo puntaje base
+(el tope de la tabla), y como el clima es el mismo para toda la ciudad
+en un día dado, casi todos "subían de nivel" el mismo día - el aviso de
+proyección salía repetido en casi toda la tabla, sin lógica real.
+
+La corrección: en vez de días absolutos, se usa el PORCENTAJE de la
+vida útil propia del producto ya consumido
+(dias_en_exhibicion / producto.vida_util_dias). Así, un tomate a 4 de
+sus 5 días de vida (80%) y una manzana a 4 de sus 15 días (27%) ya no
+quedan con el mismo puntaje solo por llevar los mismos días en el
+mueble - el tomate, que de verdad está por vencerse, pesa más que la
+manzana, que apenas empieza su vida útil. Esto también hace que la
+proyección a los próximos días vuelva a tener sentido: cada lote sube
+de nivel el día que le corresponde según SU propio porcentaje, no todos
+el mismo día.
 """
 
-# Días desde que el lote ingresó a inventario (Inventario.fecha_ingreso).
-# Mientras más tiempo lleva en exhibición, más puntos de riesgo suma.
+# Porcentaje de la vida útil propia del producto (vida_util_dias) que ya
+# lleva consumido el lote, en exhibición. Mientras más cerca está de
+# agotar su propia vida útil, más puntos de riesgo suma - sin importar
+# si esa vida útil son 5 días (ej. un tomate) o 15 (ej. una manzana).
 # Tuplas (umbral_minimo, puntos), evaluadas de mayor a menor umbral.
-PUNTOS_POR_DIAS_EXHIBICION = (
-    (6, 45),  # 6 días o más en exhibición
-    (4, 30),  # 4-5 días
-    (2, 15),  # 2-3 días
-    (0, 0),   # 0-1 día (recién ingresado)
+PUNTOS_POR_PORCENTAJE_VIDA_UTIL = (
+    (90, 45),  # 90% o más de su propia vida útil ya consumida
+    (60, 30),  # 60-89%
+    (30, 15),  # 30-59%
+    (0, 0),    # menos de 30% (recién ingresado, relativo a su producto)
 )
 
 # Temperatura máxima pronosticada para hoy, en °C.
@@ -49,9 +74,12 @@ PUNTOS_POR_HUMEDAD = (
 PUNTAJE_MAXIMO = 100
 
 # A partir de qué puntaje se considera riesgo MEDIO o ALTO (lo que no
-# llega a UMBRAL_MEDIO se considera BAJO).
-UMBRAL_ALTO = 61
-UMBRAL_MEDIO = 31
+# llega a UMBRAL_MEDIO se considera BAJO). Elegidos para que calcen con
+# los mismos cortes de 30/60/90% de la tabla de arriba: un lote que solo
+# lleva puntos por porcentaje de vida útil (sin clima) queda exactamente
+# en el nivel que corresponde a su propio porcentaje.
+UMBRAL_ALTO = 60
+UMBRAL_MEDIO = 30
 
 # Orden de menor a mayor riesgo, para poder comparar "¿este nivel es peor
 # que aquel?" - usado por la proyección de los próximos días (ver
@@ -68,12 +96,17 @@ def _puntos_por_umbral(valor, tabla_umbrales):
     return 0
 
 
-def calcular_riesgo_lote(dias_en_exhibicion, temp_max=None, humedad_promedio=None):
+def calcular_riesgo_lote(dias_en_exhibicion, vida_util_dias, temp_max=None, humedad_promedio=None):
     """
     Calcula el riesgo de descomposición de un lote de fruta/verdura.
 
     dias_en_exhibicion: días desde que el lote ingresó a inventario
         (obligatorio, siempre se puede calcular sin depender del clima).
+    vida_util_dias: Producto.vida_util_dias del lote - cuántos días dura
+        ESE producto en particular. Se usa para calcular qué porcentaje
+        de su propia vida útil ya lleva consumido el lote, en vez de
+        comparar días absolutos entre productos que duran distinto
+        (ver la nota de corrección de diseño arriba del módulo).
     temp_max: temperatura máxima pronosticada para hoy, en °C. Opcional -
         si no se pudo consultar el clima (sin API key, o la API no
         respondió), se pasa None y ese factor simplemente no suma puntos.
@@ -85,10 +118,21 @@ def calcular_riesgo_lote(dias_en_exhibicion, temp_max=None, humedad_promedio=Non
         nivel: "ALTO", "MEDIO" o "BAJO".
         badge: clase de color de Bootstrap para el semáforo (danger/
             warning/success), lista para usar en la plantilla.
+        porcentaje_vida_util: qué porcentaje de su propia vida útil lleva
+            consumido el lote (redondeado a entero), para poder explicar
+            el número en pantalla.
         factores: cuántos puntos aportó cada variable, para mostrar el
             detalle si se necesita explicar el número.
     """
-    puntos_dias = _puntos_por_umbral(dias_en_exhibicion, PUNTOS_POR_DIAS_EXHIBICION)
+    if vida_util_dias:
+        porcentaje_vida_util = (dias_en_exhibicion / vida_util_dias) * 100
+    else:
+        # No debería pasar (vida_util_dias es un campo obligatorio del
+        # producto), pero si llegara en 0 se trata como "ya al límite" en
+        # vez de dividir entre cero.
+        porcentaje_vida_util = 100
+
+    puntos_porcentaje = _puntos_por_umbral(porcentaje_vida_util, PUNTOS_POR_PORCENTAJE_VIDA_UTIL)
     puntos_temp = (
         _puntos_por_umbral(temp_max, PUNTOS_POR_TEMPERATURA)
         if temp_max is not None else 0
@@ -98,7 +142,7 @@ def calcular_riesgo_lote(dias_en_exhibicion, temp_max=None, humedad_promedio=Non
         if humedad_promedio is not None else 0
     )
 
-    puntaje = min(PUNTAJE_MAXIMO, puntos_dias + puntos_temp + puntos_humedad)
+    puntaje = min(PUNTAJE_MAXIMO, puntos_porcentaje + puntos_temp + puntos_humedad)
 
     if puntaje >= UMBRAL_ALTO:
         nivel, badge = "ALTO", "danger"
@@ -111,8 +155,9 @@ def calcular_riesgo_lote(dias_en_exhibicion, temp_max=None, humedad_promedio=Non
         "puntaje": puntaje,
         "nivel": nivel,
         "badge": badge,
+        "porcentaje_vida_util": round(porcentaje_vida_util),
         "factores": {
-            "dias_en_exhibicion": puntos_dias,
+            "porcentaje_vida_util": puntos_porcentaje,
             "temperatura": puntos_temp,
             "humedad": puntos_humedad,
         },

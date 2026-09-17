@@ -752,34 +752,60 @@ class ListarPrediccionesTests(TestCase):
 class CalcularRiesgoLoteTests(TestCase):
     """Pruebas puras del cálculo de riesgo climático de descomposición
     (core/riesgo_descomposicion.py) - no dependen de la base de datos ni
-    de la API de clima, solo de la función y sus umbrales."""
+    de la API de clima, solo de la función y sus umbrales.
 
-    def test_pocos_dias_y_sin_clima_es_riesgo_bajo(self):
-        riesgo = calcular_riesgo_lote(dias_en_exhibicion=1)
+    Corrección de diseño (reportada por Francisco en producción): el
+    cálculo ya no usa días absolutos en exhibición, sino el PORCENTAJE de
+    la vida útil propia del producto (vida_util_dias) ya consumido - así
+    un producto que dura poco y uno que dura mucho no quedan con el mismo
+    puntaje solo por llevar los mismos días en el mueble."""
+
+    def test_pocos_dias_relativos_a_su_vida_util_es_riesgo_bajo(self):
+        # 1 de 10 días de vida útil = 10% -> no llega ni al primer umbral.
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion=1, vida_util_dias=10)
         self.assertEqual(riesgo["nivel"], "BAJO")
         self.assertEqual(riesgo["puntaje"], 0)
+        self.assertEqual(riesgo["porcentaje_vida_util"], 10)
 
-    def test_mas_dias_en_exhibicion_sube_el_riesgo(self):
-        riesgo_1_dia = calcular_riesgo_lote(dias_en_exhibicion=1)
-        riesgo_3_dias = calcular_riesgo_lote(dias_en_exhibicion=3)
-        riesgo_6_dias = calcular_riesgo_lote(dias_en_exhibicion=6)
-        self.assertLess(riesgo_1_dia["puntaje"], riesgo_3_dias["puntaje"])
-        self.assertLess(riesgo_3_dias["puntaje"], riesgo_6_dias["puntaje"])
+    def test_mayor_porcentaje_de_vida_util_consumida_sube_el_riesgo(self):
+        riesgo_10pct = calcular_riesgo_lote(dias_en_exhibicion=1, vida_util_dias=10)
+        riesgo_50pct = calcular_riesgo_lote(dias_en_exhibicion=5, vida_util_dias=10)
+        riesgo_80pct = calcular_riesgo_lote(dias_en_exhibicion=8, vida_util_dias=10)
+        self.assertLess(riesgo_10pct["puntaje"], riesgo_50pct["puntaje"])
+        self.assertLess(riesgo_50pct["puntaje"], riesgo_80pct["puntaje"])
+
+    def test_mismos_dias_pero_distinta_vida_util_dan_distinto_riesgo(self):
+        # Este es justo el problema que se corrigió: un producto que dura
+        # poco (ej. un tomate, 5 días) y uno que dura mucho (ej. una
+        # manzana, 15 días) NO deben quedar con el mismo puntaje solo por
+        # llevar los mismos 6 días en exhibición - el tomate ya está casi
+        # al final de su vida útil, la manzana apenas va empezando.
+        tomate_6_dias = calcular_riesgo_lote(dias_en_exhibicion=6, vida_util_dias=5)
+        manzana_6_dias = calcular_riesgo_lote(dias_en_exhibicion=6, vida_util_dias=15)
+        self.assertGreater(tomate_6_dias["puntaje"], manzana_6_dias["puntaje"])
+        # Tomate: 6/5 = 120% de su vida útil -> tope de la tabla (45 pts,
+        # MEDIO). Manzana: 6/15 = 40% -> apenas 15 pts, BAJO.
+        self.assertEqual(tomate_6_dias["nivel"], "MEDIO")
+        self.assertEqual(manzana_6_dias["nivel"], "BAJO")
 
     def test_temperatura_alta_suma_puntos(self):
-        sin_clima = calcular_riesgo_lote(dias_en_exhibicion=1)
-        con_calor = calcular_riesgo_lote(dias_en_exhibicion=1, temp_max=32)
+        sin_clima = calcular_riesgo_lote(dias_en_exhibicion=1, vida_util_dias=10)
+        con_calor = calcular_riesgo_lote(dias_en_exhibicion=1, vida_util_dias=10, temp_max=32)
         self.assertGreater(con_calor["puntaje"], sin_clima["puntaje"])
         self.assertEqual(con_calor["factores"]["temperatura"], 25)
 
     def test_humedad_alta_suma_puntos(self):
-        sin_clima = calcular_riesgo_lote(dias_en_exhibicion=1)
-        con_humedad = calcular_riesgo_lote(dias_en_exhibicion=1, humedad_promedio=85)
+        sin_clima = calcular_riesgo_lote(dias_en_exhibicion=1, vida_util_dias=10)
+        con_humedad = calcular_riesgo_lote(dias_en_exhibicion=1, vida_util_dias=10, humedad_promedio=85)
         self.assertGreater(con_humedad["puntaje"], sin_clima["puntaje"])
         self.assertEqual(con_humedad["factores"]["humedad"], 20)
 
     def test_combinacion_de_variables_da_riesgo_alto(self):
-        riesgo = calcular_riesgo_lote(dias_en_exhibicion=6, temp_max=32, humedad_promedio=85)
+        # 9 de 10 días = 90% de vida útil consumida (45 pts) + calor (25)
+        # + humedad (20) = 90 -> ALTO.
+        riesgo = calcular_riesgo_lote(
+            dias_en_exhibicion=9, vida_util_dias=10, temp_max=32, humedad_promedio=85,
+        )
         self.assertEqual(riesgo["nivel"], "ALTO")
         self.assertEqual(riesgo["badge"], "danger")
 
@@ -787,18 +813,34 @@ class CalcularRiesgoLoteTests(TestCase):
         # El máximo posible sumando las tres tablas de puntos (45+25+20=90)
         # ya no llega a 100 - el tope solo es un colchón de seguridad para
         # si en el futuro se ajustan los umbrales hacia arriba. Se prueba
-        # directamente contra ese máximo real de hoy.
-        riesgo = calcular_riesgo_lote(dias_en_exhibicion=30, temp_max=40, humedad_promedio=100)
+        # directamente contra ese máximo real de hoy. Un lote muy por
+        # encima del 100% de su vida útil (ya debería estar descartado por
+        # fecha_vencimiento, pero se prueba el cálculo de forma aislada)
+        # sigue topando en 90, no sigue subiendo.
+        riesgo = calcular_riesgo_lote(
+            dias_en_exhibicion=30, vida_util_dias=10, temp_max=40, humedad_promedio=100,
+        )
         self.assertEqual(riesgo["puntaje"], 90)
         self.assertLessEqual(riesgo["puntaje"], 100)
 
     def test_clima_ausente_no_rompe_el_calculo(self):
         # Cuando no hay API key o la consulta falla, clima.py devuelve
-        # (None, None) - el cálculo debe seguir funcionando solo con
-        # días en exhibición, sin lanzar ningún error.
-        riesgo = calcular_riesgo_lote(dias_en_exhibicion=5, temp_max=None, humedad_promedio=None)
+        # (None, None) - el cálculo debe seguir funcionando solo con el
+        # porcentaje de vida útil, sin lanzar ningún error.
+        riesgo = calcular_riesgo_lote(
+            dias_en_exhibicion=5, vida_util_dias=10, temp_max=None, humedad_promedio=None,
+        )
         self.assertEqual(riesgo["factores"]["temperatura"], 0)
         self.assertEqual(riesgo["factores"]["humedad"], 0)
+
+    def test_vida_util_en_cero_no_lanza_error(self):
+        # No debería pasar en la práctica (vida_util_dias es obligatorio
+        # en Producto), pero el cálculo no debe reventar con división
+        # entre cero - se trata como "ya al límite de su vida útil".
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion=3, vida_util_dias=0)
+        self.assertEqual(riesgo["porcentaje_vida_util"], 100)
+        # 100% sin clima = 45 pts (tope de la tabla de porcentaje) -> MEDIO.
+        self.assertEqual(riesgo["nivel"], "MEDIO")
 
 
 class PrimerDiaQueSubeDeNivelTests(TestCase):

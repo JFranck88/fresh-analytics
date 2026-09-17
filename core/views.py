@@ -479,7 +479,8 @@ def riesgo_descomposicion(request):
     lotes = []
     for lote in lotes_qs:
         dias_en_exhibicion = (hoy - lote.fecha_ingreso).days
-        riesgo = calcular_riesgo_lote(dias_en_exhibicion, temp_max, humedad_promedio)
+        vida_util_dias = lote.producto.vida_util_dias
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion, vida_util_dias, temp_max, humedad_promedio)
 
         # Proyección a los próximos días del pronóstico (petición de
         # Francisco): en vez de una tabla día por día, solo un aviso
@@ -495,6 +496,7 @@ def riesgo_descomposicion(request):
             datos_dia = clima_por_dia[fecha_futura]
             riesgo_futuro = calcular_riesgo_lote(
                 dias_en_exhibicion + offset,
+                vida_util_dias,
                 datos_dia.get("temp_max"),
                 datos_dia.get("humedad_promedio"),
             )
