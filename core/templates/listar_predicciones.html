@@ -27,6 +27,8 @@
         <div id="resultados-prediccion" class="list-group mb-2"></div>
         <p class="text-muted small mb-2">Mostrando: <strong id="producto-actual-texto">—</strong></p>
         <canvas id="grafica-prediccion" height="90"></canvas>
+        <p class="text-muted small mt-2 mb-0">Haz clic en un punto de la gráfica para ver el detalle de ese día.</p>
+        <div id="detalle-dia-prediccion" class="alert alert-light border d-none mt-2 mb-0 py-2"></div>
     </div>
 </div>
 
@@ -35,6 +37,8 @@
     const datosGrafica = {{ datos_grafica_json|safe }};
     const infoProductos = {{ info_productos_json|safe }};
     const diasLluvia = {{ dias_lluvia_json|safe }};
+    const infoDias = {{ info_dias_json|safe }};
+    const detalleDiaPrediccion = document.getElementById('detalle-dia-prediccion');
 
     const inputUpcPrediccion = document.getElementById('buscar-upc-prediccion');
     const inputDescPrediccion = document.getElementById('buscar-desc-prediccion');
@@ -96,9 +100,46 @@
     inputUpcPrediccion.addEventListener('keydown', manejarEnterPrediccion);
     inputDescPrediccion.addEventListener('keydown', manejarEnterPrediccion);
 
+    // Detalle por día (petición de Francisco): al hacer clic en un punto
+    // de la gráfica, mostrar el pronóstico del tiempo de ESE día en
+    // particular, más un aviso si además cae en quincena o en fin de
+    // mes - información agregada a la gráfica, no un reemplazo de ella.
+    function mostrarDetalleDia(fechaIso) {
+        const info = infoDias[fechaIso];
+        if (!info) { detalleDiaPrediccion.classList.add('d-none'); return; }
+
+        const partes = [`<strong>${info.texto}</strong>`];
+
+        if (info.clima_disponible) {
+            const clima = [];
+            if (info.temp_max !== null && info.temp_max !== undefined) {
+                clima.push(`máx. ${Math.round(info.temp_max)}°C`);
+            }
+            if (info.humedad_promedio !== null && info.humedad_promedio !== undefined) {
+                clima.push(`humedad ${Math.round(info.humedad_promedio)}%`);
+            }
+            if (info.prob_lluvia !== null && info.prob_lluvia !== undefined) {
+                clima.push(`${info.prob_lluvia}% de probabilidad de lluvia`);
+            }
+            partes.push(clima.length ? clima.join(' · ') : 'Clima no disponible para este día.');
+        } else {
+            partes.push('Clima no disponible para este día (fuera del rango del pronóstico).');
+        }
+
+        if (info.es_quincena) {
+            partes.push('📅 Cae en quincena - se espera mayor demanda.');
+        } else if (info.es_fin_de_mes) {
+            partes.push('📅 Cae en fin de mes - se espera mayor demanda.');
+        }
+
+        detalleDiaPrediccion.innerHTML = partes.join('<br>');
+        detalleDiaPrediccion.classList.remove('d-none');
+    }
+
     let chartTendencia;
     function dibujar(pid) {
         const datos = datosGrafica[pid];
+        detalleDiaPrediccion.classList.add('d-none');
         if (chartTendencia) chartTendencia.destroy();
         const ctx = document.getElementById('grafica-prediccion').getContext('2d');
         chartTendencia = new Chart(ctx, {
@@ -143,6 +184,11 @@
                         beginAtZero: true,
                         title: { display: true, text: 'Unidades de venta esperadas' },
                     }
+                },
+                onClick: function (evt, elementos) {
+                    if (!elementos.length) return;
+                    const indice = elementos[0].index;
+                    mostrarDetalleDia(datos.fechas[indice]);
                 },
             }
         });

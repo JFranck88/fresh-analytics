@@ -30,7 +30,15 @@ NIVEL_POR_TIPO = {
     "EXCEDENTE": "success",
 }
 
-DIAS_QUINCENA = [14, 15, 16, 29, 30, 31, 1]
+# Días de quincena/fin de mes (mismo criterio que factor_quincena en el
+# generador de datos sintéticos: hay más flujo de gente comprando cerca
+# de esos pagos). Separados en dos listas (además de la unión, que ya
+# usa el mensaje del dashboard) para poder mostrarlos como dos avisos
+# distintos en el detalle por día de Predicciones - "es quincena" no es
+# lo mismo que "es fin de mes", aunque ambos suban la demanda parecido.
+DIAS_QUINCENA_MEDIO = (14, 15, 16)
+DIAS_FIN_DE_MES = (29, 30, 31, 1)
+DIAS_QUINCENA = DIAS_QUINCENA_MEDIO + DIAS_FIN_DE_MES
 
 REGISTROS_POR_PAGINA = 25
 
@@ -559,20 +567,52 @@ def listar_predicciones(request):
         .order_by("producto__nombre", "fecha_pronosticada")
     )
 
+    # Clima y probabilidad de lluvia por día (misma fuente que ya usa esta
+    # pantalla para el punto naranja de "día de lluvia" y el aviso de
+    # arriba) - se reutilizan aquí para el detalle que aparece al hacer
+    # clic en un punto de la gráfica (petición de Francisco: ver el
+    # pronóstico del tiempo de ESE día en particular, no solo si llueve
+    # o no). El plan gratuito de OpenWeatherMap solo cubre ~5 días, así
+    # que los días más lejanos del rango de 7 simplemente no van a tener
+    # clima disponible - se avisa en vez de mostrar un dato inventado.
+    clima_por_dia = pronostico_temperatura_humedad_por_dia()
+    lluvia_por_dia = pronostico_lluvia_real()
+
     datos_grafica = {}
     info_productos = {}
+    info_dias = {}
     for p in predicciones:
         pid = str(p.producto.id_producto)
         if pid not in datos_grafica:
-            datos_grafica[pid] = {"labels": [], "predicho": [], "inferior": [], "superior": []}
+            datos_grafica[pid] = {
+                "labels": [], "predicho": [], "inferior": [], "superior": [], "fechas": [],
+            }
             info_productos[pid] = {"nombre": p.producto.nombre, "upc": p.producto.codigo_upc}
-        datos_grafica[pid]["labels"].append(p.fecha_pronosticada.strftime("%d/%m"))
+        fecha = p.fecha_pronosticada
+        fecha_iso = fecha.isoformat()
+        datos_grafica[pid]["labels"].append(fecha.strftime("%d/%m"))
         datos_grafica[pid]["predicho"].append(float(p.valor_predicho))
         datos_grafica[pid]["inferior"].append(float(p.intervalo_inferior))
         datos_grafica[pid]["superior"].append(float(p.intervalo_superior))
+        datos_grafica[pid]["fechas"].append(fecha_iso)
+
+        if fecha_iso not in info_dias:
+            clima_dia = clima_por_dia.get(fecha, {})
+            prob_lluvia = lluvia_por_dia.get(fecha)
+            temp_max = clima_dia.get("temp_max")
+            humedad_promedio = clima_dia.get("humedad_promedio")
+            info_dias[fecha_iso] = {
+                "texto": f"{DIAS_SEMANA_ES[fecha.weekday()]} {fecha.strftime('%d/%m')}",
+                "temp_max": temp_max,
+                "humedad_promedio": humedad_promedio,
+                "prob_lluvia": round(prob_lluvia * 100) if prob_lluvia is not None else None,
+                "clima_disponible": temp_max is not None or humedad_promedio is not None or prob_lluvia is not None,
+                "es_quincena": fecha.day in DIAS_QUINCENA_MEDIO,
+                "es_fin_de_mes": fecha.day in DIAS_FIN_DE_MES,
+            }
 
     dias_lluvia = []
-    for fecha, prob in pronostico_lluvia_real().items():
+    for fecha, prob in lluvia_por_dia.items():
         if prob >= 0.4:
             dias_lluvia.append(fecha.strftime("%d/%m"))
 
@@ -584,6 +624,7 @@ def listar_predicciones(request):
         "modelo_al_dia": dias_desde_prediccion == 0,
         "datos_grafica_json": json.dumps(datos_grafica),
         "info_productos_json": json.dumps(info_productos),
+        "info_dias_json": json.dumps(info_dias),
         "mensajes_contexto": mensajes_contexto,
         "dias_lluvia_json": json.dumps(dias_lluvia),
     })

@@ -11,7 +11,8 @@ Configuración- se comporte como se espera. No sustituye una revisión
 manual completa, pero cubre las rutas críticas.
 """
 
-from datetime import timedelta
+import json
+from datetime import date, timedelta
 from io import StringIO
 from unittest.mock import patch
 
@@ -792,6 +793,101 @@ class ListarPrediccionesTests(TestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertNotContains(respuesta, "Qué tan confiable es el modelo")
         self.assertNotIn("validacion_json", respuesta.context)
+
+
+class PrediccionesDetalleDiaTests(TestCase):
+    """Petición de Francisco: al hacer clic en un punto de la gráfica de
+    Predicciones, ver el pronóstico del tiempo de ESE día, más un aviso
+    si además cae en quincena o en fin de mes. `info_dias_json` (por
+    fecha ISO) es lo que la plantilla usa para armar ese detalle - estas
+    pruebas cubren el cálculo del lado del servidor, no el clic en sí
+    (eso es JS puro, sin lógica de negocio que probar aquí)."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("detalle.comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.producto = crear_producto()
+        self.client.force_login(self.comprador)
+
+    def _info_dias(self, respuesta):
+        return json.loads(respuesta.context["info_dias_json"])
+
+    def _crear_prediccion(self, fecha_pronosticada):
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=timezone.localdate(),
+            fecha_pronosticada=fecha_pronosticada,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+        )
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_dia_15_se_marca_como_quincena(self, _mock_lluvia, _mock_clima):
+        fecha = date(2026, 9, 15)
+        self._crear_prediccion(fecha)
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        info = self._info_dias(respuesta)[fecha.isoformat()]
+        self.assertTrue(info["es_quincena"])
+        self.assertFalse(info["es_fin_de_mes"])
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_dia_30_se_marca_como_fin_de_mes(self, _mock_lluvia, _mock_clima):
+        fecha = date(2026, 9, 30)
+        self._crear_prediccion(fecha)
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        info = self._info_dias(respuesta)[fecha.isoformat()]
+        self.assertTrue(info["es_fin_de_mes"])
+        self.assertFalse(info["es_quincena"])
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_dia_normal_no_es_ni_quincena_ni_fin_de_mes(self, _mock_lluvia, _mock_clima):
+        fecha = date(2026, 9, 10)
+        self._crear_prediccion(fecha)
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        info = self._info_dias(respuesta)[fecha.isoformat()]
+        self.assertFalse(info["es_quincena"])
+        self.assertFalse(info["es_fin_de_mes"])
+
+    def test_dia_con_clima_disponible_incluye_temperatura_humedad_y_lluvia(self):
+        fecha = date(2026, 9, 10)
+        self._crear_prediccion(fecha)
+        with patch(
+            "core.views.pronostico_temperatura_humedad_por_dia",
+            return_value={fecha: {"temp_max": 29.0, "humedad_promedio": 70.0}},
+        ), patch("core.views.pronostico_lluvia_real", return_value={fecha: 0.6}):
+            respuesta = self.client.get(reverse("listar_predicciones"))
+        info = self._info_dias(respuesta)[fecha.isoformat()]
+        self.assertTrue(info["clima_disponible"])
+        self.assertEqual(info["temp_max"], 29.0)
+        self.assertEqual(info["humedad_promedio"], 70.0)
+        self.assertEqual(info["prob_lluvia"], 60)
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_dia_fuera_del_rango_del_pronostico_avisa_que_no_hay_clima(self, _mock_lluvia, _mock_clima):
+        # El plan gratuito de OpenWeatherMap solo cubre ~5 días - un día
+        # fuera de ese rango (los últimos de los 7 que muestra la
+        # gráfica) simplemente no aparece en ninguno de los dos
+        # diccionarios de clima.
+        fecha = date(2026, 9, 10)
+        self._crear_prediccion(fecha)
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        info = self._info_dias(respuesta)[fecha.isoformat()]
+        self.assertFalse(info["clima_disponible"])
+        self.assertIsNone(info["temp_max"])
+        self.assertIsNone(info["humedad_promedio"])
+        self.assertIsNone(info["prob_lluvia"])
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_fechas_de_la_grafica_alinean_con_las_etiquetas(self, _mock_lluvia, _mock_clima):
+        fecha = date(2026, 9, 10)
+        self._crear_prediccion(fecha)
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        datos_grafica = json.loads(respuesta.context["datos_grafica_json"])
+        pid = str(self.producto.id_producto)
+        self.assertEqual(datos_grafica[pid]["fechas"], [fecha.isoformat()])
+        self.assertEqual(len(datos_grafica[pid]["fechas"]), len(datos_grafica[pid]["labels"]))
 
 
 class CalcularRiesgoLoteTests(TestCase):
