@@ -20,6 +20,13 @@
     </div>
 {% endif %}
 
+{% if producto_filtro %}
+    <div class="alert alert-light border d-flex justify-content-between align-items-center mb-3 py-2">
+        <span>Mostrando solo: <strong>{{ producto_filtro.nombre }}</strong></span>
+        <a href="{% url 'riesgo_descomposicion' %}" class="small">Ver todos</a>
+    </div>
+{% endif %}
+
 <div class="card">
     <div class="card-body p-0">
         {% if lotes %}
@@ -62,7 +69,13 @@
         {% else %}
             <div class="estado-vacio">
                 <i class="bi bi-check-circle"></i>
-                No hay lotes de frutas o verduras en inventario para evaluar.
+                {% if producto_fuera_de_alcance %}
+                    Riesgo climático solo aplica a Frutas y Verduras — {{ producto_filtro.nombre }} pertenece a {{ producto_filtro.get_categoria_display }}.
+                {% elif producto_filtro %}
+                    No hay lotes de {{ producto_filtro.nombre }} en riesgo en este momento.
+                {% else %}
+                    No hay lotes de frutas o verduras en inventario para evaluar.
+                {% endif %}
             </div>
         {% endif %}
     </div>

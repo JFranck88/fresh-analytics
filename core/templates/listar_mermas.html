@@ -6,6 +6,14 @@
         <a href="{% url 'registrar_merma' %}" class="btn btn-primary btn-sm">+ Registrar merma</a>
     {% endif %}
 </div>
+
+{% if producto_filtro %}
+    <div class="alert alert-light border d-flex justify-content-between align-items-center mb-3 py-2">
+        <span>Mostrando solo: <strong>{{ producto_filtro.nombre }}</strong></span>
+        <a href="{% url 'listar_mermas' %}" class="small">Ver todas</a>
+    </div>
+{% endif %}
+
 <div class="card">
     <div class="card-body p-0">
         <table class="table table-striped mb-0">
@@ -14,7 +22,7 @@
                 {% for merma in mermas %}
                 <tr><td>{{ merma.fecha }}</td><td class="text-muted small">{{ merma.producto.codigo_upc|default:"—" }}</td><td>{{ merma.producto.nombre }}</td><td>{{ merma.cantidad }}</td><td>{{ merma.get_motivo_display }}</td><td>Q {{ merma.costo_perdida }}</td></tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>Sin mermas registradas todavía.</td></tr>
+                <tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>{% if producto_filtro %}Sin mermas registradas para {{ producto_filtro.nombre }}.{% else %}Sin mermas registradas todavía.{% endif %}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -28,7 +36,7 @@
         <ul class="pagination pagination-sm mb-0">
             <li class="page-item {% if not mermas.has_previous %}disabled{% endif %}">
                 {% if mermas.has_previous %}
-                <a class="page-link" href="?pagina={{ mermas.previous_page_number }}">Anterior</a>
+                <a class="page-link" href="?pagina={{ mermas.previous_page_number }}&producto={{ producto_id }}">Anterior</a>
                 {% else %}
                 <span class="page-link">Anterior</span>
                 {% endif %}
@@ -36,7 +44,7 @@
             <li class="page-item disabled"><span class="page-link">Página {{ mermas.number }} de {{ mermas.paginator.num_pages }}</span></li>
             <li class="page-item {% if not mermas.has_next %}disabled{% endif %}">
                 {% if mermas.has_next %}
-                <a class="page-link" href="?pagina={{ mermas.next_page_number }}">Siguiente</a>
+                <a class="page-link" href="?pagina={{ mermas.next_page_number }}&producto={{ producto_id }}">Siguiente</a>
                 {% else %}
                 <span class="page-link">Siguiente</span>
                 {% endif %}

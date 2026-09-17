@@ -1137,3 +1137,141 @@ class RiesgoDescomposicionVistaTests(TestCase):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
         fila = respuesta.context["lotes"][0]
         self.assertIsNone(fila["aviso_proyeccion"])
+
+
+class RiesgoDescomposicionFiltroPorProductoTests(TestCase):
+    """Bug real reportado por Francisco (con capturas): el buscador global
+    de la topbar siempre mandaba a Predicciones, incluso buscando desde
+    Riesgo climático - mismo patrón ya corregido antes para Predicciones/
+    Alertas (ver BuscarGlobalRedireccionDeAlertasTests), que reapareció al
+    agregar esta pantalla nueva porque el destino nunca se generalizó.
+    Ahora esta vista sabe filtrarse por ?producto=, para que el buscador
+    pueda quedarse aquí en vez de saltar de módulo."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("riesgo.filtro.comprador@test.com", Usuario.Rol.COMPRADOR)
+        hoy = timezone.localdate()
+
+        self.manzana = crear_producto(
+            nombre="Manzana roja", upc="3333333333", categoria=Producto.Categoria.FRUTAS,
+        )
+        Inventario.objects.create(
+            producto=self.manzana, fecha_ingreso=hoy - timedelta(days=6),
+            fecha_vencimiento=hoy + timedelta(days=2), cantidad=10, lote="L-MANZANA",
+        )
+
+        self.lechuga = crear_producto(
+            nombre="Lechuga", upc="4444444444", categoria=Producto.Categoria.VERDURAS,
+        )
+        Inventario.objects.create(
+            producto=self.lechuga, fecha_ingreso=hoy - timedelta(days=3),
+            fecha_vencimiento=hoy + timedelta(days=3), cantidad=20, lote="L-LECHUGA",
+        )
+
+        self.leche = crear_producto(
+            nombre="Leche entera 1L", upc="5555555555", categoria=Producto.Categoria.LACTEOS,
+        )
+
+        self.client.force_login(self.comprador)
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_filtra_solo_el_producto_pedido(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"), {"producto": self.manzana.id_producto})
+        lotes_mostrados = [l["producto"] for l in respuesta.context["lotes"]]
+        self.assertEqual(lotes_mostrados, ["Manzana roja"])
+        self.assertEqual(respuesta.context["producto_filtro"], self.manzana)
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_sin_filtro_muestra_todos_como_antes(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        lotes_mostrados = {l["producto"] for l in respuesta.context["lotes"]}
+        self.assertEqual(lotes_mostrados, {"Manzana roja", "Lechuga"})
+        self.assertIsNone(respuesta.context["producto_filtro"])
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_avisa_cuando_el_producto_no_es_fruta_ni_verdura(self, _mock_clima):
+        # Buscar "leche" desde aquí no debe verse como un error silencioso
+        # (tabla vacía sin explicación) - esta pantalla es exclusiva de
+        # Frutas/Verduras, y hay que decir por qué no aparece nada.
+        respuesta = self.client.get(reverse("riesgo_descomposicion"), {"producto": self.leche.id_producto})
+        self.assertEqual(list(respuesta.context["lotes"]), [])
+        self.assertTrue(respuesta.context["producto_fuera_de_alcance"])
+        self.assertContains(respuesta, "solo aplica a Frutas y Verduras")
+
+
+class ListarMermasFiltroPorProductoTests(TestCase):
+    """Mismo criterio que RiesgoDescomposicionFiltroPorProductoTests: el
+    buscador global también puede traer aquí un producto puntual desde
+    cualquier módulo, así que Mermas necesita saber filtrarse por él."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("mermas.filtro.gerente@test.com", Usuario.Rol.GERENTE)
+        self.manzana = crear_producto(nombre="Manzana roja", upc="6666666666")
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7777777777")
+        Merma.objects.create(
+            producto=self.manzana, fecha=timezone.localdate(),
+            cantidad=2, motivo=Merma.Motivo.DANO, costo_perdida=5,
+        )
+        Merma.objects.create(
+            producto=self.leche, fecha=timezone.localdate(),
+            cantidad=1, motivo=Merma.Motivo.VENCIMIENTO, costo_perdida=6,
+        )
+        self.client.force_login(self.gerente)
+
+    def test_filtra_solo_el_producto_pedido(self):
+        respuesta = self.client.get(reverse("listar_mermas"), {"producto": self.manzana.id_producto})
+        productos_mostrados = [m.producto.nombre for m in respuesta.context["mermas"]]
+        self.assertEqual(productos_mostrados, ["Manzana roja"])
+        self.assertEqual(respuesta.context["producto_filtro"], self.manzana)
+
+    def test_sin_filtro_muestra_todas_como_antes(self):
+        respuesta = self.client.get(reverse("listar_mermas"))
+        productos_mostrados = {m.producto.nombre for m in respuesta.context["mermas"]}
+        self.assertEqual(productos_mostrados, {"Manzana roja", "Leche entera 1L"})
+        self.assertIsNone(respuesta.context["producto_filtro"])
+
+    def test_paginacion_conserva_el_filtro_de_producto(self):
+        for i in range(30):
+            Merma.objects.create(
+                producto=self.manzana, fecha=timezone.localdate() - timedelta(days=i),
+                cantidad=1, motivo=Merma.Motivo.VENCIMIENTO, costo_perdida=1,
+            )
+        respuesta = self.client.get(reverse("listar_mermas"), {"producto": self.manzana.id_producto})
+        self.assertEqual(respuesta.context["mermas"].paginator.num_pages, 2)
+        self.assertContains(respuesta, f"producto={self.manzana.id_producto}")
+
+
+class BuscarTopbarModuloActualTests(TestCase):
+    """El buscador de la topbar (base.html) es un único componente
+    compartido por todas las pantallas - por eso el bug de "me saca del
+    módulo" reapareció dos veces con módulos distintos (ver
+    BuscarGlobalRedireccionDeAlertasTests y
+    RiesgoDescomposicionFiltroPorProductoTests). En vez de arreglar
+    módulo por módulo otra vez la próxima vez, esto verifica que CADA
+    pantalla le informe correctamente al JS del buscador cuál es el
+    módulo actual (moduloActual), que es lo que decide a dónde manda un
+    resultado de producto/alerta."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("topbar.modulo.gerente@test.com", Usuario.Rol.GERENTE)
+        self.client.force_login(self.gerente)
+
+    def test_dashboard_reporta_su_propio_modulo(self):
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertContains(respuesta, "var moduloActual = 'dashboard';")
+
+    def test_predicciones_reporta_su_propio_modulo(self):
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        self.assertContains(respuesta, "var moduloActual = 'listar_predicciones';")
+
+    def test_historial_decisiones_reporta_su_propio_modulo(self):
+        respuesta = self.client.get(reverse("historial_decisiones"))
+        self.assertContains(respuesta, "var moduloActual = 'historial_decisiones';")
+
+    def test_riesgo_descomposicion_reporta_su_propio_modulo(self):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        self.assertContains(respuesta, "var moduloActual = 'riesgo_descomposicion';")
+
+    def test_listar_mermas_reporta_su_propio_modulo(self):
+        respuesta = self.client.get(reverse("listar_mermas"))
+        self.assertContains(respuesta, "var moduloActual = 'listar_mermas';")

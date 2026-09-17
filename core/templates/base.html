@@ -171,6 +171,25 @@
         var temporizador;
         var consultaActual = '';
 
+        // A qué módulo debe llevar un resultado de producto/alerta (bug
+        // reportado por Francisco, primero en Predicciones+Alertas y
+        // luego otra vez en Riesgo climático): este buscador es un
+        // componente ÚNICO compartido por todas las pantallas, así que
+        // antes el destino estaba fijo a Predicciones sin importar en
+        // qué módulo se buscara - te sacaba de donde estabas. Ahora, si
+        // el módulo actual sabe mostrar un producto puntual (filtro
+        // ?producto=), el resultado se queda ahí; si no (Dashboard,
+        // Alertas, Recomendaciones, etc.), cae a Predicciones por
+        // defecto, igual que antes.
+        var MODULOS_CON_FILTRO_PRODUCTO = {
+            'listar_predicciones': '{% url "listar_predicciones" %}',
+            'historial_decisiones': '{% url "historial_decisiones" %}',
+            'riesgo_descomposicion': '{% url "riesgo_descomposicion" %}',
+            'listar_mermas': '{% url "listar_mermas" %}'
+        };
+        var moduloActual = '{{ request.resolver_match.url_name }}';
+        var urlDestinoProducto = MODULOS_CON_FILTRO_PRODUCTO[moduloActual] || '{% url "listar_predicciones" %}';
+
         function ocultar() {
             resultados.classList.remove('mostrando');
             resultados.innerHTML = '';
@@ -178,7 +197,7 @@
 
         function filaProducto(p) {
             var div = document.createElement('a');
-            div.href = '{% url "listar_predicciones" %}?producto=' + encodeURIComponent(p.id);
+            div.href = urlDestinoProducto + '?producto=' + encodeURIComponent(p.id);
             div.className = 'topbar-buscador-item';
             div.innerHTML = '<span class="topbar-buscador-item-upc">' + (p.upc || '—') + '</span>' +
                 '<span class="topbar-buscador-item-texto"><strong>' + p.nombre + '</strong>' +
@@ -194,10 +213,11 @@
             // sacándolo del módulo en el que estaba buscando - para
             // Francisco, un resultado de alerta y un resultado de
             // producto sobre "leche" son ambos, sencillamente, "leche".
-            // Ahora un resultado de alerta lleva al MISMO destino que un
-            // resultado de producto (Predicciones filtrado a ese
-            // producto) en vez de saltar al módulo de Alertas.
-            div.href = '{% url "listar_predicciones" %}?producto=' + encodeURIComponent(a.producto_id);
+            // Un resultado de alerta lleva al MISMO destino que uno de
+            // producto (ver urlDestinoProducto arriba: el módulo actual
+            // si sabe filtrar por producto, si no Predicciones) en vez
+            // de saltar siempre al módulo de Alertas.
+            div.href = urlDestinoProducto + '?producto=' + encodeURIComponent(a.producto_id);
             div.className = 'topbar-buscador-item';
             div.innerHTML = '<span class="badge bg-' + a.nivel + '">&nbsp;</span>' +
                 '<span class="topbar-buscador-item-texto"><strong>' + a.producto + '</strong> — ' + a.mensaje + '</span>';

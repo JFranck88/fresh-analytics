@@ -454,9 +454,23 @@ def registrar_merma(request):
 @rol_requerido("GERENTE", "COMPRADOR")
 def listar_mermas(request):
     mermas_qs = Merma.objects.select_related("producto").order_by("-fecha")
+
+    # Mismo criterio que en riesgo_descomposicion (ver ahí el porqué): el
+    # buscador global de la topbar puede traer aquí un producto puntual
+    # desde cualquier módulo.
+    producto_id = request.GET.get("producto", "").strip()
+    producto_filtro = None
+    if producto_id:
+        mermas_qs = mermas_qs.filter(producto_id=producto_id)
+        producto_filtro = Producto.objects.filter(id_producto=producto_id).first()
+
     paginador = Paginator(mermas_qs, REGISTROS_POR_PAGINA)
     mermas = paginador.get_page(request.GET.get("pagina"))
-    return render(request, "listar_mermas.html", {"mermas": mermas})
+    return render(request, "listar_mermas.html", {
+        "mermas": mermas,
+        "producto_id": producto_id,
+        "producto_filtro": producto_filtro,
+    })
 
 
 @rol_requerido("GERENTE", "COMPRADOR")
@@ -471,6 +485,19 @@ def riesgo_descomposicion(request):
     clima_hoy = clima_por_dia.get(hoy, {})
     temp_max = clima_hoy.get("temp_max")
     humedad_promedio = clima_hoy.get("humedad_promedio")
+
+    # Filtro opcional por producto (bug reportado por Francisco): el
+    # buscador global de la topbar puede traer aquí un producto puntual
+    # desde CUALQUIER módulo (ver base.html, MODULOS_CON_FILTRO_PRODUCTO).
+    # Antes esta pantalla ignoraba ?producto= por completo, así que el
+    # buscador terminaba mandando siempre a Predicciones en su lugar,
+    # sacando al usuario de Riesgo climático sin necesidad. Mismo criterio
+    # aplicado en listar_mermas.
+    producto_id = request.GET.get("producto", "").strip()
+    producto_filtro = Producto.objects.filter(id_producto=producto_id).first() if producto_id else None
+    producto_fuera_de_alcance = producto_filtro is not None and producto_filtro.categoria not in (
+        Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS,
+    )
 
     lotes_qs = (
         Inventario.objects.filter(
@@ -493,6 +520,8 @@ def riesgo_descomposicion(request):
         .select_related("producto")
         .order_by("fecha_ingreso")
     )
+    if producto_id:
+        lotes_qs = lotes_qs.filter(producto_id=producto_id)
 
     lotes = []
     for lote in lotes_qs:
@@ -548,6 +577,8 @@ def riesgo_descomposicion(request):
         "temp_max": temp_max,
         "humedad_promedio": humedad_promedio,
         "clima_disponible": temp_max is not None or humedad_promedio is not None,
+        "producto_filtro": producto_filtro,
+        "producto_fuera_de_alcance": producto_fuera_de_alcance,
     }
     return render(request, "riesgo_descomposicion.html", contexto)
 
