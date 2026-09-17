@@ -296,50 +296,6 @@ class AlertaFechaLecturaTests(TestCase):
         self.assertIsNone(self.alerta.fecha_lectura)
 
 
-class ListarAlertasFiltroPorProductoTests(TestCase):
-    """Bug real reportado por Francisco: al buscar algo en el buscador de
-    la topbar (visible en Dashboard/Predicciones/Historial/etc.) y hacer
-    clic en un resultado de tipo alerta, la pantalla SIEMPRE llevaba al
-    listado completo de Alertas sin ningún filtro - se perdía de vista
-    qué se había buscado. Ahora el link lleva `?producto=<id>` y esta
-    vista filtra por ese producto."""
-
-    def setUp(self):
-        self.gerente = crear_usuario("filtro.gerente@test.com", Usuario.Rol.GERENTE)
-        self.yogur = crear_producto(nombre="Yogur natural", upc="7501111111111")
-        self.queso = crear_producto(nombre="Queso fresco", upc="7502222222222")
-        Alerta.objects.create(
-            producto=self.yogur, tipo=Alerta.Tipo.STOCK_BAJO, mensaje="Stock bajo de yogur",
-        )
-        Alerta.objects.create(
-            producto=self.queso, tipo=Alerta.Tipo.VENCIMIENTO, mensaje="Queso por vencer",
-        )
-        self.client.force_login(self.gerente)
-
-    def test_sin_filtro_muestra_todas_las_alertas(self):
-        respuesta = self.client.get(reverse("listar_alertas"))
-        productos_mostrados = [a["producto"] for a in respuesta.context["alertas"]]
-        self.assertIn("Yogur natural", productos_mostrados)
-        self.assertIn("Queso fresco", productos_mostrados)
-        self.assertIsNone(respuesta.context["producto_filtro"])
-
-    def test_filtro_por_producto_solo_muestra_sus_alertas(self):
-        respuesta = self.client.get(reverse("listar_alertas"), {"producto": self.yogur.id_producto})
-        productos_mostrados = [a["producto"] for a in respuesta.context["alertas"]]
-        self.assertEqual(productos_mostrados, ["Yogur natural"])
-        self.assertEqual(respuesta.context["producto_filtro"], self.yogur)
-        self.assertContains(respuesta, "Filtrando por")
-        self.assertContains(respuesta, "Yogur natural")
-
-    def test_producto_id_invalido_no_rompe_la_pagina(self):
-        respuesta = self.client.get(reverse("listar_alertas"), {"producto": "no-es-un-id"})
-        self.assertEqual(respuesta.status_code, 200)
-        self.assertIsNone(respuesta.context["producto_filtro"])
-        productos_mostrados = [a["producto"] for a in respuesta.context["alertas"]]
-        self.assertIn("Yogur natural", productos_mostrados)
-        self.assertIn("Queso fresco", productos_mostrados)
-
-
 class ConfiguracionEdicionTests(TestCase):
     """Regresión del fix de esta sesión: editar un parámetro existente
     debe actualizarlo, no fallar por la validación de clave única."""
@@ -667,9 +623,11 @@ class BuscarGlobalJsonTests(TestCase):
 
     def test_alerta_incluye_el_id_del_producto_para_poder_filtrar(self):
         # El resultado de tipo alerta debe traer el id del producto, para
-        # que el clic en la topbar lleve a Alertas YA filtrado por ese
-        # producto en vez de al listado completo sin filtrar (bug real
-        # reportado por Francisco - ver ListarAlertasFiltroPorProductoTests).
+        # que el clic en la topbar lleve al MISMO destino que un
+        # resultado de producto (Predicciones filtrado a ese producto) en
+        # vez de sacar a quien busca del módulo en el que estaba y
+        # llevarlo al módulo de Alertas (bug real reportado por Francisco
+        # - ver BuscarGlobalRedireccionDeAlertasTests).
         self.client.force_login(self.comprador)
         respuesta = self.client.get(reverse("buscar_global_json"), {"q": "yogur"})
         datos = respuesta.json()
@@ -684,6 +642,39 @@ class BuscarGlobalJsonTests(TestCase):
         self.assertEqual(len(datos["productos"]), 1)
         self.assertEqual(datos["alertas"], [])
         self.assertEqual(datos["lotes"], [])
+
+
+class BuscarGlobalRedireccionDeAlertasTests(TestCase):
+    """Bug real reportado por Francisco (con capturas): buscando desde
+    Predicciones (el buscador de la topbar es el mismo en todas las
+    pantallas), un resultado de tipo alerta lo sacaba del módulo en el
+    que estaba y lo mandaba al módulo de Alertas - "creo que lógicamente
+    no está bien", en sus palabras, porque para él un resultado de
+    alerta y uno de producto sobre lo mismo (ej. "leche") son igual de
+    válidos, y no esperaba que uno lo cambiara de módulo. Un primer
+    intento filtró Alertas por producto, pero seguía siendo un cambio de
+    módulo - la corrección real es que el resultado de alerta lleve al
+    MISMO destino que el de producto (Predicciones filtrado a ese
+    producto), nunca a Alertas."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("redireccion.gerente@test.com", Usuario.Rol.GERENTE)
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7503333333333")
+        Alerta.objects.create(
+            producto=self.leche, tipo=Alerta.Tipo.STOCK_BAJO, mensaje="Stock bajo de leche",
+        )
+        self.client.force_login(self.gerente)
+
+    def test_resultado_de_alerta_en_la_pagina_completa_lleva_a_predicciones(self):
+        respuesta = self.client.get(reverse("buscar_global"), {"q": "leche"})
+        # El link del resultado de alerta (sección "Alertas activas" de
+        # /buscar/) debe ir a Predicciones filtrado a este producto - no
+        # a Alertas. La barra lateral sí tiene su propio link fijo a
+        # Alertas (/alertas/, sin filtro), así que no se puede afirmar
+        # "el href /alertas/ no aparece en ningún lado de la página" -
+        # se verifica específicamente que exista el link correcto.
+        url_esperada = f"{reverse('listar_predicciones')}?producto={self.leche.id_producto}"
+        self.assertContains(respuesta, f'href="{url_esperada}"', count=2)
 
 
 class AsignarUpcDemoTests(TestCase):

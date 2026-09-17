@@ -253,6 +253,15 @@ def _buscar_global_resultados(consulta, puede_ver_operativo, limite):
             alertas = [
                 {
                     "producto": a.producto.nombre,
+                    # id del producto: se usa para que, al hacer clic en
+                    # este resultado (topbar o /buscar/), se llegue al
+                    # MISMO destino que un resultado de producto
+                    # (Predicciones filtrado a ese producto) en vez de
+                    # saltar al módulo de Alertas - para quien busca, un
+                    # resultado de alerta y uno de producto sobre lo mismo
+                    # son igual de válidos como "esto es lo que buscabas",
+                    # y no deberían mandarlo a un módulo distinto del que
+                    # ya estaba usando (reportado por Francisco).
                     "producto_id": a.producto.id_producto,
                     "producto_upc": a.producto.codigo_upc,
                     "mensaje": a.mensaje,
@@ -382,29 +391,11 @@ def buscar_productos_json(request):
 
 @rol_requerido("GERENTE", "COMPRADOR")
 def listar_alertas(request):
-    # Filtro opcional por producto (?producto=<id_producto>): lo usa el
-    # buscador global (topbar y /buscar/) para que al hacer clic en una
-    # alerta encontrada por búsqueda, la pantalla llegue mostrando SOLO
-    # las alertas de ese producto - antes cualquier alerta de la búsqueda
-    # llevaba siempre al listado completo sin filtrar, perdiendo de vista
-    # qué se había buscado (reportado por Francisco). Un id inválido o de
-    # un producto sin alertas simplemente no filtra nada raro - se ignora
-    # en silencio y se sigue mostrando la lista completa.
-    producto_filtro = None
-    producto_id = request.GET.get("producto")
     alertas_qs = (
         Alerta.objects.filter(leida=False)
         .select_related("producto")
         .order_by("tipo", "producto__nombre")
     )
-    if producto_id:
-        try:
-            producto_filtro = Producto.objects.get(pk=producto_id)
-        except (Producto.DoesNotExist, ValueError):
-            producto_filtro = None
-        else:
-            alertas_qs = alertas_qs.filter(producto_id=producto_filtro.id_producto)
-
     alertas = [
         {
             "id": a.id_alerta,
@@ -416,10 +407,7 @@ def listar_alertas(request):
         }
         for a in alertas_qs
     ]
-    return render(request, "listar_alertas.html", {
-        "alertas": alertas,
-        "producto_filtro": producto_filtro,
-    })
+    return render(request, "listar_alertas.html", {"alertas": alertas})
 
 
 @rol_requerido("GERENTE", "COMPRADOR")

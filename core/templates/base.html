@@ -189,10 +189,15 @@
         function filaAlerta(a) {
             var div = document.createElement('a');
             // Antes esto siempre llevaba al listado COMPLETO de alertas,
-            // sin importar cuál se buscó - se perdía de vista qué se
-            // había encontrado (reportado por Francisco). Ahora filtra
-            // por el producto de esta alerta en particular.
-            div.href = '{% url "listar_alertas" %}?producto=' + encodeURIComponent(a.producto_id);
+            // sin importar cuál se buscó (bug reportado por Francisco).
+            // Un primer intento lo filtró por producto, pero seguía
+            // sacándolo del módulo en el que estaba buscando - para
+            // Francisco, un resultado de alerta y un resultado de
+            // producto sobre "leche" son ambos, sencillamente, "leche".
+            // Ahora un resultado de alerta lleva al MISMO destino que un
+            // resultado de producto (Predicciones filtrado a ese
+            // producto) en vez de saltar al módulo de Alertas.
+            div.href = '{% url "listar_predicciones" %}?producto=' + encodeURIComponent(a.producto_id);
             div.className = 'topbar-buscador-item';
             div.innerHTML = '<span class="badge bg-' + a.nivel + '">&nbsp;</span>' +
                 '<span class="topbar-buscador-item-texto"><strong>' + a.producto + '</strong> — ' + a.mensaje + '</span>';
