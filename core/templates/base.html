@@ -188,7 +188,11 @@
 
         function filaAlerta(a) {
             var div = document.createElement('a');
-            div.href = '{% url "listar_alertas" %}';
+            // Antes esto siempre llevaba al listado COMPLETO de alertas,
+            // sin importar cuál se buscó - se perdía de vista qué se
+            // había encontrado (reportado por Francisco). Ahora filtra
+            // por el producto de esta alerta en particular.
+            div.href = '{% url "listar_alertas" %}?producto=' + encodeURIComponent(a.producto_id);
             div.className = 'topbar-buscador-item';
             div.innerHTML = '<span class="badge bg-' + a.nivel + '">&nbsp;</span>' +
                 '<span class="topbar-buscador-item-texto"><strong>' + a.producto + '</strong> — ' + a.mensaje + '</span>';

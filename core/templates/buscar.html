@@ -42,7 +42,7 @@
     <div class="card mb-4">
         <div class="list-group list-group-flush">
             {% for a in alertas %}
-            <a href="{% url 'listar_alertas' %}" class="list-group-item list-group-item-action d-flex align-items-center gap-2">
+            <a href="{% url 'listar_alertas' %}?producto={{ a.producto_id }}" class="list-group-item list-group-item-action d-flex align-items-center gap-2">
                 <span class="badge bg-{{ a.nivel }}">&nbsp;</span>
                 <span class="flex-grow-1">
                     <strong>{{ a.producto }}</strong> — {{ a.mensaje }}
