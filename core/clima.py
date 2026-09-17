@@ -54,3 +54,52 @@ def pronostico_lluvia_real():
         prob_por_dia[fecha].append(item.get("pop", 0))
 
     return {fecha: max(valores) for fecha, valores in prob_por_dia.items()}
+
+
+def pronostico_temperatura_humedad_hoy():
+    """Consulta el mismo pronóstico de OpenWeatherMap (Ciudad de Guatemala)
+    que pronostico_lluvia_real(), pero para alimentar el riesgo climático
+    de descomposición (ver core/riesgo_descomposicion.py): de los bloques
+    de 3 horas que caen en el día de HOY, devuelve la temperatura MÁXIMA
+    (el peor caso para una fruta o verdura expuesta) y la humedad relativa
+    PROMEDIO. Se hace como una consulta aparte, en vez de reutilizar la de
+    pronostico_lluvia_real(), a propósito: ese módulo/función ya está
+    probado y en uso (RF-08) y el cambio de riesgo climático se pidió
+    como algo aditivo que no debía tocar nada existente.
+
+    Igual que pronostico_lluvia_real(): si no hay API key o la consulta
+    falla, devuelve (None, None) en vez de reventar - el cálculo de
+    riesgo simplemente no suma puntos por ese factor cuando no hay dato."""
+    api_key = config("OPENWEATHER_API_KEY", default=None)
+    if not api_key:
+        return None, None
+
+    url = (
+        "https://api.openweathermap.org/data/2.5/forecast"
+        f"?q=Guatemala City,GT&appid={api_key}&units=metric"
+    )
+    try:
+        respuesta = requests.get(url, timeout=10)
+        respuesta.raise_for_status()
+        datos = respuesta.json()
+    except requests.RequestException:
+        return None, None
+
+    hoy = dt.date.today()
+    temperaturas_hoy = []
+    humedades_hoy = []
+    for item in datos.get("list", []):
+        fecha = dt.datetime.fromtimestamp(item["dt"]).date()
+        if fecha != hoy:
+            continue
+        principal = item.get("main", {})
+        if "temp" in principal:
+            temperaturas_hoy.append(principal["temp"])
+        if "humidity" in principal:
+            humedades_hoy.append(principal["humidity"])
+
+    temp_max = max(temperaturas_hoy) if temperaturas_hoy else None
+    humedad_promedio = (
+        sum(humedades_hoy) / len(humedades_hoy) if humedades_hoy else None
+    )
+    return temp_max, humedad_promedio

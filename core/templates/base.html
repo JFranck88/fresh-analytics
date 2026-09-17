@@ -47,6 +47,9 @@
                 <a href="{% url 'listar_mermas' %}" class="sidebar-link {% if request.resolver_match.url_name == 'listar_mermas' %}activo{% endif %}" title="Mermas">
                     <i class="bi bi-recycle"></i><span class="sidebar-texto">Mermas</span>
                 </a>
+                <a href="{% url 'riesgo_descomposicion' %}" class="sidebar-link {% if request.resolver_match.url_name == 'riesgo_descomposicion' %}activo{% endif %}" title="Riesgo climático">
+                    <i class="bi bi-thermometer-sun"></i><span class="sidebar-texto">Riesgo climático</span>
+                </a>
             {% endif %}
             {% if user.rol == "ADMINISTRADOR" or user.is_superuser_admin %}
                 <div class="sidebar-divisor"></div>

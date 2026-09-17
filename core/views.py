@@ -21,7 +21,8 @@ from .forms import (
     EditarUsuarioForm, RestablecerPasswordForm,
 )
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta, DecisionHistorial
-from .clima import pronostico_lluvia_real
+from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_hoy
+from .riesgo_descomposicion import calcular_riesgo_lote
 
 NIVEL_POR_TIPO = {
     "VENCIMIENTO": "danger",
@@ -51,14 +52,6 @@ def obtener_parametro(clave, default):
         return Configuracion.objects.get(clave=clave).valor
     except Configuracion.DoesNotExist:
         return default
-
-
-def obtener_validacion_cruzada():
-    try:
-        raw = Configuracion.objects.get(clave="validacion_cruzada_resultado").valor
-        return json.loads(raw)
-    except (Configuracion.DoesNotExist, json.JSONDecodeError):
-        return None
 
 
 def categorias_afectadas_por_lluvia(fecha_lluvia):
@@ -172,6 +165,17 @@ def dashboard(request):
     dias_desde_prediccion = (hoy - fecha_prediccion_max).days if fecha_prediccion_max else None
     modelo_al_dia = dias_desde_prediccion is not None and dias_desde_prediccion == 0
 
+    # RF/diseño de interfaz (5.3.2.1): la tarjeta "Precisión del modelo"
+    # del dashboard es el MAPE promedio de las predicciones de la corrida
+    # más reciente - no la validación cruzada histórica de auditar_modelo
+    # (esa es un análisis técnico aparte, sobre todo el catálogo junto, y
+    # solo existe si se corrió ese comando manualmente).
+    precision_modelo_promedio = None
+    if fecha_prediccion_max:
+        precision_modelo_promedio = Prediccion.objects.filter(
+            fecha_prediccion=fecha_prediccion_max, precision_modelo__isnull=False,
+        ).aggregate(promedio=Avg("precision_modelo"))["promedio"]
+
     inicio_semana = hoy - timedelta(days=6)
     ventas_diarias = (
         Venta.objects.filter(fecha__date__gte=inicio_semana, fecha__date__lte=hoy)
@@ -202,6 +206,7 @@ def dashboard(request):
         # el valor real es el que esté configurado aquí (default 3) - se
         # pasa al contexto para que la plantilla muestre el número correcto.
         "dias_alerta_vencimiento": int(obtener_parametro("dias_alerta_vencimiento", 3)),
+        "precision_modelo_promedio": precision_modelo_promedio,
         "alertas": alertas,
         "mensajes_contexto": construir_contexto_inteligente(hoy),
         "modelo_al_dia": modelo_al_dia,
@@ -436,6 +441,53 @@ def listar_mermas(request):
     return render(request, "listar_mermas.html", {"mermas": mermas})
 
 
+@rol_requerido("GERENTE", "COMPRADOR")
+def riesgo_descomposicion(request):
+    # Cambio estructural aditivo (ver riesgo_descomposicion.py): estimado
+    # de riesgo de descomposición SOLO para Frutas y Verduras, que no
+    # traen fecha de caducidad impresa. No toca fecha_vencimiento, Alerta
+    # ni ninguna otra lógica de vencimiento ya existente - es información
+    # extra, en su propia pantalla.
+    hoy = timezone.localdate()
+    temp_max, humedad_promedio = pronostico_temperatura_humedad_hoy()
+
+    lotes_qs = (
+        Inventario.objects.filter(
+            producto__categoria__in=[
+                Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS,
+            ],
+            cantidad__gt=0,
+        )
+        .select_related("producto")
+        .order_by("fecha_ingreso")
+    )
+
+    lotes = []
+    for lote in lotes_qs:
+        dias_en_exhibicion = (hoy - lote.fecha_ingreso).days
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion, temp_max, humedad_promedio)
+        lotes.append({
+            "lote": lote.lote,
+            "producto": lote.producto.nombre,
+            "producto_upc": lote.producto.codigo_upc,
+            "categoria": lote.producto.get_categoria_display(),
+            "cantidad": lote.cantidad,
+            "fecha_ingreso": lote.fecha_ingreso,
+            "dias_en_exhibicion": dias_en_exhibicion,
+            **riesgo,
+        })
+
+    lotes.sort(key=lambda fila: fila["puntaje"], reverse=True)
+
+    contexto = {
+        "lotes": lotes,
+        "temp_max": temp_max,
+        "humedad_promedio": humedad_promedio,
+        "clima_disponible": temp_max is not None or humedad_promedio is not None,
+    }
+    return render(request, "riesgo_descomposicion.html", contexto)
+
+
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
 def listar_predicciones(request):
     hoy = timezone.localdate()
@@ -469,7 +521,6 @@ def listar_predicciones(request):
             dias_lluvia.append(fecha.strftime("%d/%m"))
 
     dias_desde_prediccion = (hoy - fecha_max).days if fecha_max else None
-    validacion_cruzada = obtener_validacion_cruzada()
 
     return render(request, "listar_predicciones.html", {
         "predicciones": predicciones,
@@ -477,7 +528,6 @@ def listar_predicciones(request):
         "modelo_al_dia": dias_desde_prediccion == 0,
         "datos_grafica_json": json.dumps(datos_grafica),
         "info_productos_json": json.dumps(info_productos),
-        "validacion_json": json.dumps(validacion_cruzada) if validacion_cruzada else None,
         "mensajes_contexto": mensajes_contexto,
         "dias_lluvia_json": json.dumps(dias_lluvia),
     })

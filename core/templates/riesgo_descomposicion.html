@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<h5 class="mb-1">Riesgo climático de descomposición</h5>
+<p class="text-muted small">Frutas y verduras no traen una fecha de caducidad impresa. Este estimado combina los días que lleva el lote en exhibición con el clima de hoy para señalar cuáles conviene revisar primero.</p>
+
+{% if not clima_disponible %}
+    <div class="alert alert-light border d-flex align-items-center gap-2 mb-3 py-2">
+        <span style="font-size: 1.2rem;">🌤️</span>
+        <span>No se pudo consultar el clima de hoy - el estimado de abajo solo toma en cuenta los días en exhibición.</span>
+    </div>
+{% else %}
+    <div class="alert alert-light border d-flex align-items-center gap-2 mb-3 py-2">
+        <span style="font-size: 1.2rem;">🌡️</span>
+        <span>
+            Clima de hoy:
+            {% if temp_max %}máx. {{ temp_max|floatformat:0 }}°C{% endif %}
+            {% if temp_max and humedad_promedio %}·{% endif %}
+            {% if humedad_promedio %}humedad {{ humedad_promedio|floatformat:0 }}%{% endif %}
+        </span>
+    </div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if lotes %}
+            <table class="table table-striped mb-0">
+                <thead>
+                    <tr>
+                        <th>UPC</th>
+                        <th>Producto</th>
+                        <th>Categoría</th>
+                        <th>Lote</th>
+                        <th>Cantidad</th>
+                        <th>Días en exhibición</th>
+                        <th>Riesgo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for l in lotes %}
+                    <tr>
+                        <td class="text-muted small">{{ l.producto_upc|default:"—" }}</td>
+                        <td>{{ l.producto }}</td>
+                        <td>{{ l.categoria }}</td>
+                        <td>{{ l.lote|default:"—" }}</td>
+                        <td>{{ l.cantidad|floatformat:0 }}</td>
+                        <td>{{ l.dias_en_exhibicion }}</td>
+                        <td><span class="badge bg-{{ l.badge }}">{{ l.nivel }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="estado-vacio">
+                <i class="bi bi-check-circle"></i>
+                No hay lotes de frutas o verduras en inventario para evaluar.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

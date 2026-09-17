@@ -13,6 +13,7 @@ manual completa, pero cubre las rutas críticas.
 
 from datetime import timedelta
 from io import StringIO
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
@@ -23,6 +24,7 @@ from .models import (
     Producto, Inventario, Merma, Prediccion, Usuario,
     Alerta, Configuracion, DecisionHistorial,
 )
+from .riesgo_descomposicion import calcular_riesgo_lote
 
 
 def crear_usuario(correo, rol, password="Clave-Segura-123"):
@@ -107,7 +109,7 @@ class ControlDeAccesoPorRolTests(TestCase):
     # Vistas que NO reciben argumentos de URL, agrupadas por a quién
     # deben permitirle entrar (200) y a quién deben rechazarle (403).
     SOLO_COMPRADOR = ["registrar_merma", "listar_recomendaciones", "generar_orden_compra"]
-    COMPRADOR_Y_GERENTE = ["listar_alertas", "listar_mermas", "historial_decisiones"]
+    COMPRADOR_Y_GERENTE = ["listar_alertas", "listar_mermas", "historial_decisiones", "riesgo_descomposicion"]
     SOLO_ADMINISTRADOR = ["listar_usuarios", "crear_usuario", "listar_configuracion", "mantenimiento"]
     TODOS_LOS_ROLES = ["dashboard", "listar_predicciones", "buscar_global"]
 
@@ -669,3 +671,194 @@ class AsignarUpcDemoTests(TestCase):
         self._correr()
         self.sin_upc.refresh_from_db()
         self.assertEqual(self.sin_upc.codigo_upc, primer_codigo)
+
+
+class DashboardPrecisionModeloTests(TestCase):
+    """La tarjeta "Precisión del modelo" del dashboard (pedida por el
+    diseño de interfaz documentado, 5.3.2.1) es el MAPE promedio de las
+    predicciones de la corrida MÁS RECIENTE - no la validación cruzada
+    histórica de auditar_modelo, que es un análisis técnico aparte sobre
+    todo el catálogo junto y ya no se muestra en ninguna pantalla."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("precision.comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.producto = crear_producto()
+
+    def test_muestra_promedio_de_precision_de_la_corrida_mas_reciente(self):
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+            precision_modelo=10.0,
+        )
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy + timedelta(days=1),
+            valor_predicho=12, intervalo_inferior=6, intervalo_superior=18,
+            precision_modelo=20.0,
+        )
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.context["precision_modelo_promedio"], 15.0)
+        # Con LANGUAGE_CODE="es", floatformat usa coma como separador
+        # decimal (igual que el resto de la interfaz, ej. "Q 0,00") -
+        # "15,0%", no "15.0%".
+        self.assertContains(respuesta, "15,0%")
+
+    def test_ignora_corridas_anteriores(self):
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy - timedelta(days=1), fecha_pronosticada=hoy,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+            precision_modelo=99.0,
+        )
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+            precision_modelo=10.0,
+        )
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.context["precision_modelo_promedio"], 10.0)
+
+    def test_nd_cuando_no_hay_predicciones(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertIsNone(respuesta.context["precision_modelo_promedio"])
+        self.assertContains(respuesta, "N/D")
+
+
+class ListarPrediccionesTests(TestCase):
+    """La gráfica "Qué tan confiable es el modelo" (validación cruzada
+    de auditar_modelo, agregada sobre TODO el catálogo) se sacó de esta
+    pantalla: no es parte del diseño de interfaz documentado para
+    Predicciones, y mostraba un promedio de todos los productos aunque
+    la pantalla ya está mostrando un producto puntual - la precisión de
+    ESE producto sigue en la columna "Margen de error" de la tabla."""
+
+    def test_ya_no_muestra_la_grafica_de_validacion_cruzada(self):
+        comprador = crear_usuario("prediccion.comprador@test.com", Usuario.Rol.COMPRADOR)
+        Configuracion.objects.create(
+            clave="validacion_cruzada_resultado",
+            valor='{"dias": [1], "mape": [12.0], "productos": 1, "fecha": "2026-01-01"}',
+            descripcion="Resultado de auditar_modelo (uso interno, ya no se muestra en pantalla).",
+        )
+        self.client.force_login(comprador)
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertNotContains(respuesta, "Qué tan confiable es el modelo")
+        self.assertNotIn("validacion_json", respuesta.context)
+
+
+class CalcularRiesgoLoteTests(TestCase):
+    """Pruebas puras del cálculo de riesgo climático de descomposición
+    (core/riesgo_descomposicion.py) - no dependen de la base de datos ni
+    de la API de clima, solo de la función y sus umbrales."""
+
+    def test_pocos_dias_y_sin_clima_es_riesgo_bajo(self):
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion=1)
+        self.assertEqual(riesgo["nivel"], "BAJO")
+        self.assertEqual(riesgo["puntaje"], 0)
+
+    def test_mas_dias_en_exhibicion_sube_el_riesgo(self):
+        riesgo_1_dia = calcular_riesgo_lote(dias_en_exhibicion=1)
+        riesgo_3_dias = calcular_riesgo_lote(dias_en_exhibicion=3)
+        riesgo_6_dias = calcular_riesgo_lote(dias_en_exhibicion=6)
+        self.assertLess(riesgo_1_dia["puntaje"], riesgo_3_dias["puntaje"])
+        self.assertLess(riesgo_3_dias["puntaje"], riesgo_6_dias["puntaje"])
+
+    def test_temperatura_alta_suma_puntos(self):
+        sin_clima = calcular_riesgo_lote(dias_en_exhibicion=1)
+        con_calor = calcular_riesgo_lote(dias_en_exhibicion=1, temp_max=32)
+        self.assertGreater(con_calor["puntaje"], sin_clima["puntaje"])
+        self.assertEqual(con_calor["factores"]["temperatura"], 25)
+
+    def test_humedad_alta_suma_puntos(self):
+        sin_clima = calcular_riesgo_lote(dias_en_exhibicion=1)
+        con_humedad = calcular_riesgo_lote(dias_en_exhibicion=1, humedad_promedio=85)
+        self.assertGreater(con_humedad["puntaje"], sin_clima["puntaje"])
+        self.assertEqual(con_humedad["factores"]["humedad"], 20)
+
+    def test_combinacion_de_variables_da_riesgo_alto(self):
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion=6, temp_max=32, humedad_promedio=85)
+        self.assertEqual(riesgo["nivel"], "ALTO")
+        self.assertEqual(riesgo["badge"], "danger")
+
+    def test_puntaje_nunca_pasa_de_cien(self):
+        # El máximo posible sumando las tres tablas de puntos (45+25+20=90)
+        # ya no llega a 100 - el tope solo es un colchón de seguridad para
+        # si en el futuro se ajustan los umbrales hacia arriba. Se prueba
+        # directamente contra ese máximo real de hoy.
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion=30, temp_max=40, humedad_promedio=100)
+        self.assertEqual(riesgo["puntaje"], 90)
+        self.assertLessEqual(riesgo["puntaje"], 100)
+
+    def test_clima_ausente_no_rompe_el_calculo(self):
+        # Cuando no hay API key o la consulta falla, clima.py devuelve
+        # (None, None) - el cálculo debe seguir funcionando solo con
+        # días en exhibición, sin lanzar ningún error.
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion=5, temp_max=None, humedad_promedio=None)
+        self.assertEqual(riesgo["factores"]["temperatura"], 0)
+        self.assertEqual(riesgo["factores"]["humedad"], 0)
+
+
+class RiesgoDescomposicionVistaTests(TestCase):
+    """RF/cambio estructural aditivo: la pantalla de riesgo climático solo
+    debe mostrar lotes de Frutas y Verduras (las categorías sin fecha de
+    caducidad impresa), calculando los días en exhibición desde
+    Inventario.fecha_ingreso y sin tocar fecha_vencimiento ni Alerta."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("riesgo.comprador@test.com", Usuario.Rol.COMPRADOR)
+        hoy = timezone.localdate()
+
+        self.manzana = crear_producto(
+            nombre="Manzana roja", upc="1111111111", categoria=Producto.Categoria.FRUTAS,
+        )
+        Inventario.objects.create(
+            producto=self.manzana, fecha_ingreso=hoy - timedelta(days=6),
+            fecha_vencimiento=hoy + timedelta(days=2), cantidad=10, lote="L1",
+        )
+
+        self.leche = crear_producto(
+            nombre="Leche entera 1L", upc="2222222222", categoria=Producto.Categoria.LACTEOS,
+        )
+        Inventario.objects.create(
+            producto=self.leche, fecha_ingreso=hoy - timedelta(days=6),
+            fecha_vencimiento=hoy + timedelta(days=2), cantidad=10, lote="L2",
+        )
+
+        self.client.force_login(self.comprador)
+
+    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    def test_solo_incluye_frutas_y_verduras(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        productos_mostrados = [l["producto"] for l in respuesta.context["lotes"]]
+        self.assertIn("Manzana roja", productos_mostrados)
+        self.assertNotIn("Leche entera 1L", productos_mostrados)
+
+    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    def test_calcula_dias_en_exhibicion_desde_fecha_ingreso(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        fila = respuesta.context["lotes"][0]
+        self.assertEqual(fila["dias_en_exhibicion"], 6)
+
+    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    def test_sin_clima_disponible_sigue_funcionando(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(respuesta.context["clima_disponible"])
+        # Con 6 días en exhibición y sin clima, el puntaje viene solo de
+        # PUNTOS_POR_DIAS_EXHIBICION (45) -> nivel MEDIO.
+        self.assertEqual(respuesta.context["lotes"][0]["nivel"], "MEDIO")
+
+    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(32.0, 85.0))
+    def test_con_clima_disponible_sube_el_riesgo(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        self.assertTrue(respuesta.context["clima_disponible"])
+        self.assertEqual(respuesta.context["lotes"][0]["nivel"], "ALTO")
+
+    @patch("core.views.pronostico_temperatura_humedad_hoy", return_value=(None, None))
+    def test_no_afecta_fecha_vencimiento_del_inventario(self, _mock_clima):
+        self.client.get(reverse("riesgo_descomposicion"))
+        lote = Inventario.objects.get(lote="L1")
+        self.assertEqual(lote.fecha_vencimiento, timezone.localdate() + timedelta(days=2))

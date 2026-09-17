@@ -65,6 +65,19 @@
             </div>
         </div>
     </div>
+    <div class="col-6 col-md-3">
+        <div class="card kpi-card kpi-modelo">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="kpi-etiqueta mb-0">Precisión del modelo</p>
+                        <p class="kpi-valor mb-0">{% if precision_modelo_promedio %}{{ precision_modelo_promedio|floatformat:1 }}%{% else %}N/D{% endif %}</p>
+                    </div>
+                    <div class="kpi-icono kpi-icono-modelo"><i class="bi bi-bullseye"></i></div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card mb-4">

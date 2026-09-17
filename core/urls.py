@@ -8,6 +8,7 @@ urlpatterns = [
     path("productos/buscar-json/", views.buscar_productos_json, name="buscar_productos_json"),
     path("mermas/registrar/", views.registrar_merma, name="registrar_merma"),
     path("mermas/", views.listar_mermas, name="listar_mermas"),
+    path("riesgo-descomposicion/", views.riesgo_descomposicion, name="riesgo_descomposicion"),
     path("alertas/", views.listar_alertas, name="listar_alertas"),
     path("alertas/<int:alerta_id>/leida/", views.marcar_alerta_leida, name="marcar_alerta_leida"),
     path("predicciones/", views.listar_predicciones, name="listar_predicciones"),
