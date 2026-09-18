@@ -31,11 +31,6 @@
             <a href="{% url 'listar_predicciones' %}" class="sidebar-link {% if request.resolver_match.url_name == 'listar_predicciones' %}activo{% endif %}" title="Predicciones">
                 <i class="bi bi-graph-up-arrow"></i><span class="sidebar-texto">Predicciones</span>
             </a>
-            {% if user.rol == "GERENTE" or user.rol == "ADMINISTRADOR" or user.is_superuser_admin %}
-                <a href="{% url 'tendencia_aprendizaje_modelo' %}" class="sidebar-link {% if request.resolver_match.url_name == 'tendencia_aprendizaje_modelo' %}activo{% endif %}" title="Aprendizaje del modelo">
-                    <i class="bi bi-cpu"></i><span class="sidebar-texto">Aprendizaje del modelo</span>
-                </a>
-            {% endif %}
             {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
                 <a href="{% url 'listar_recomendaciones' %}" class="sidebar-link {% if request.resolver_match.url_name == 'listar_recomendaciones' %}activo{% endif %}" title="Recomendaciones">
                     <i class="bi bi-cart-check"></i><span class="sidebar-texto">Recomendaciones</span>
@@ -54,6 +49,11 @@
                 </a>
                 <a href="{% url 'riesgo_descomposicion' %}" class="sidebar-link {% if request.resolver_match.url_name == 'riesgo_descomposicion' %}activo{% endif %}" title="Riesgo climático">
                     <i class="bi bi-thermometer-sun"></i><span class="sidebar-texto">Riesgo climático</span>
+                </a>
+            {% endif %}
+            {% if user.rol == "GERENTE" or user.rol == "ADMINISTRADOR" or user.is_superuser_admin %}
+                <a href="{% url 'tendencia_aprendizaje_modelo' %}" class="sidebar-link {% if request.resolver_match.url_name == 'tendencia_aprendizaje_modelo' %}activo{% endif %}" title="Aprendizaje del modelo">
+                    <i class="bi bi-cpu"></i><span class="sidebar-texto">Aprendizaje del modelo</span>
                 </a>
             {% endif %}
             {% if user.rol == "ADMINISTRADOR" or user.is_superuser_admin %}
