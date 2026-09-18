@@ -435,11 +435,23 @@ def buscar_productos_json(request):
 
 @rol_requerido("GERENTE", "COMPRADOR")
 def listar_alertas(request):
+    # ?tipo=VENCIMIENTO - agregado para que la tarjeta "Por vencer" del
+    # dashboard lleve directo a las alertas de ese tipo, en vez de solo
+    # mostrar un número (petición de Francisco, 2026-09-18). Se valida
+    # contra Alerta.Tipo para no filtrar por cualquier texto arbitrario
+    # en la URL.
+    tipo_filtro = request.GET.get("tipo") or None
+    if tipo_filtro not in dict(Alerta.Tipo.choices):
+        tipo_filtro = None
+
     alertas_qs = (
         Alerta.objects.filter(leida=False)
         .select_related("producto")
         .order_by("tipo", "producto__nombre")
     )
+    if tipo_filtro:
+        alertas_qs = alertas_qs.filter(tipo=tipo_filtro)
+
     alertas = [
         {
             "id": a.id_alerta,
@@ -451,7 +463,11 @@ def listar_alertas(request):
         }
         for a in alertas_qs
     ]
-    return render(request, "listar_alertas.html", {"alertas": alertas})
+    return render(request, "listar_alertas.html", {
+        "alertas": alertas,
+        "tipo_filtro": tipo_filtro,
+        "tipo_filtro_texto": dict(Alerta.Tipo.choices).get(tipo_filtro),
+    })
 
 
 @rol_requerido("GERENTE", "COMPRADOR")
@@ -750,6 +766,12 @@ def listar_recomendaciones(request):
         messages.success(request, "Ajustes guardados en el historial de decisiones.")
         return redirect("listar_recomendaciones")
 
+    # ?pendientes=1 - agregado para que la tarjeta "Productos a
+    # reabastecer hoy" del dashboard lleve directo a la lista filtrada a
+    # esos productos, en vez de solo mostrar un número (petición de
+    # Francisco, 2026-09-18).
+    solo_pendientes = request.GET.get("pendientes") == "1"
+
     recomendaciones = []
     for producto in Producto.objects.filter(activo=True):
         prediccion_semana = Prediccion.objects.filter(
@@ -762,6 +784,9 @@ def listar_recomendaciones(request):
 
         sugerido = max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
 
+        if solo_pendientes and sugerido <= 0:
+            continue
+
         recomendaciones.append({
             "producto_id": producto.id_producto,
             "producto": producto.nombre,
@@ -772,7 +797,10 @@ def listar_recomendaciones(request):
             "sugerido": sugerido,
         })
 
-    return render(request, "listar_recomendaciones.html", {"recomendaciones": recomendaciones})
+    return render(request, "listar_recomendaciones.html", {
+        "recomendaciones": recomendaciones,
+        "solo_pendientes": solo_pendientes,
+    })
 
 
 @rol_requerido("GERENTE", "COMPRADOR")

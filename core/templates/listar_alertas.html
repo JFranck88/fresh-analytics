@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 <h5 class="mb-3"><i class="bi bi-bell me-2"></i>Alertas activas</h5>
+
+{% if tipo_filtro %}
+    <div class="alert alert-light border d-flex justify-content-between align-items-center mb-3 py-2">
+        <span>Mostrando solo: <strong>{{ tipo_filtro_texto }}</strong></span>
+        <a href="{% url 'listar_alertas' %}" class="small">Ver todas</a>
+    </div>
+{% endif %}
+
 <div class="card">
     <div class="card-body p-0">
         {% if alertas %}
@@ -24,7 +32,7 @@
         {% else %}
             <div class="estado-vacio">
                 <i class="bi bi-check-circle"></i>
-                Todo en orden. No hay alertas activas en este momento.
+                {% if tipo_filtro %}Todo en orden. No hay alertas de {{ tipo_filtro_texto|lower }} en este momento.{% else %}Todo en orden. No hay alertas activas en este momento.{% endif %}
             </div>
         {% endif %}
     </div>

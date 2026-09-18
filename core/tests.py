@@ -808,6 +808,111 @@ class DashboardKpisTests(TestCase):
         self.assertEqual(respuesta.context["productos_a_reabastecer_hoy"], 0)
 
 
+class DashboardKpisClickablesTests(TestCase):
+    """Las tarjetas "Por vencer" y "Productos a reabastecer hoy" del
+    dashboard deben llevar a la pantalla con el detalle (Alertas y
+    Recomendaciones) SOLO para los roles que de verdad tienen acceso a
+    esa pantalla - petición de Francisco (2026-09-18) de hacerlas
+    clicables, sin mandar a un rol sin permiso a un 403."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("clic.comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.gerente = crear_usuario("clic.gerente@test.com", Usuario.Rol.GERENTE)
+        self.administrador = crear_usuario("clic.admin@test.com", Usuario.Rol.ADMINISTRADOR)
+
+    def test_comprador_ve_los_dos_enlaces(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertContains(respuesta, reverse("listar_alertas") + "?tipo=VENCIMIENTO")
+        self.assertContains(respuesta, reverse("listar_recomendaciones") + "?pendientes=1")
+
+    def test_gerente_ve_solo_el_enlace_de_alertas(self):
+        # Gerente entra a Alertas pero no a Recomendaciones (no ajusta
+        # cantidades - ver matriz de control de acceso).
+        self.client.force_login(self.gerente)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertContains(respuesta, reverse("listar_alertas") + "?tipo=VENCIMIENTO")
+        self.assertNotContains(respuesta, reverse("listar_recomendaciones") + "?pendientes=1")
+
+    def test_administrador_no_ve_ningun_enlace(self):
+        # Administrador no entra ni a Alertas ni a Recomendaciones -
+        # ambas tarjetas deben quedar como texto plano, no como link.
+        self.client.force_login(self.administrador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertNotContains(respuesta, reverse("listar_alertas") + "?tipo=VENCIMIENTO")
+        self.assertNotContains(respuesta, reverse("listar_recomendaciones") + "?pendientes=1")
+
+
+class ListarAlertasFiltroPorTipoTests(TestCase):
+    """?tipo=VENCIMIENTO en Alertas - agregado para que la tarjeta "Por
+    vencer" del dashboard lleve directo a esas alertas."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("filtro.gerente@test.com", Usuario.Rol.GERENTE)
+        self.producto = crear_producto()
+        Alerta.objects.create(
+            producto=self.producto, tipo=Alerta.Tipo.VENCIMIENTO, mensaje="Vence pronto",
+        )
+        Alerta.objects.create(
+            producto=self.producto, tipo=Alerta.Tipo.STOCK_BAJO, mensaje="Stock bajo",
+        )
+        self.client.force_login(self.gerente)
+
+    def test_filtra_solo_el_tipo_pedido(self):
+        respuesta = self.client.get(reverse("listar_alertas"), {"tipo": "VENCIMIENTO"})
+        self.assertEqual(len(respuesta.context["alertas"]), 1)
+        self.assertContains(respuesta, "Vence pronto")
+        self.assertNotContains(respuesta, "Stock bajo")
+
+    def test_sin_filtro_muestra_todas(self):
+        respuesta = self.client.get(reverse("listar_alertas"))
+        self.assertEqual(len(respuesta.context["alertas"]), 2)
+
+    def test_tipo_invalido_se_ignora(self):
+        respuesta = self.client.get(reverse("listar_alertas"), {"tipo": "NO_EXISTE"})
+        self.assertEqual(len(respuesta.context["alertas"]), 2)
+        self.assertIsNone(respuesta.context["tipo_filtro"])
+
+
+class ListarRecomendacionesPendientesTests(TestCase):
+    """?pendientes=1 en Recomendaciones - agregado para que la tarjeta
+    "Productos a reabastecer hoy" del dashboard lleve directo a la lista
+    filtrada a esos productos."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("pendientes.comprador@test.com", Usuario.Rol.COMPRADOR)
+        hoy = timezone.localdate()
+        self.necesita_reabasto = crear_producto(nombre="Lechuga", upc="7501234500098")
+        self.no_necesita = crear_producto(nombre="Aguacate hass", upc="7501234500097")
+        Prediccion.objects.create(
+            producto=self.necesita_reabasto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=20, intervalo_inferior=10, intervalo_superior=30,
+        )
+        Inventario.objects.create(
+            producto=self.necesita_reabasto, fecha_ingreso=hoy,
+            fecha_vencimiento=hoy + timedelta(days=5), cantidad=5,
+        )
+        Prediccion.objects.create(
+            producto=self.no_necesita, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=5, intervalo_inferior=2, intervalo_superior=8,
+        )
+        Inventario.objects.create(
+            producto=self.no_necesita, fecha_ingreso=hoy,
+            fecha_vencimiento=hoy + timedelta(days=5), cantidad=10,
+        )
+        self.client.force_login(self.comprador)
+
+    def test_filtra_solo_los_que_necesitan_reabasto(self):
+        respuesta = self.client.get(reverse("listar_recomendaciones"), {"pendientes": "1"})
+        self.assertEqual(len(respuesta.context["recomendaciones"]), 1)
+        self.assertContains(respuesta, "Lechuga")
+        self.assertNotContains(respuesta, "Aguacate hass")
+
+    def test_sin_filtro_muestra_todos(self):
+        respuesta = self.client.get(reverse("listar_recomendaciones"))
+        self.assertEqual(len(respuesta.context["recomendaciones"]), 2)
+
+
 class ListarPrediccionesTests(TestCase):
     """La gráfica "Qué tan confiable es el modelo" (validación cruzada
     de auditar_modelo, agregada sobre TODO el catálogo) se sacó de esta

@@ -94,6 +94,19 @@ a:hover {
 .kpi-card.kpi-amber { border-left-color: #C08500 !important; }
 .kpi-card.kpi-modelo { border-left-color: var(--bosque) !important; }
 
+/* Tarjetas de KPI que llevan a una pantalla con el detalle (Por vencer ->
+   Alertas, Productos a reabastecer hoy -> Recomendaciones) - pedido de
+   Francisco, 2026-09-18, para que un clic muestre la información en vez
+   de solo el número. */
+.kpi-clickable {
+    cursor: pointer;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.kpi-clickable:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
 .kpi-valor {
     font-size: 30px;
     font-weight: 700;
