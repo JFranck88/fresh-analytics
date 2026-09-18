@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h5 class="mb-1">Riesgo climático de descomposición</h5>
-<p class="text-muted small">Frutas y verduras no traen una fecha de caducidad impresa. Este estimado combina qué porcentaje de su propia vida útil lleva consumido cada lote (no días absolutos - un producto que dura 5 días y uno que dura 15 no se comparan igual) con el clima de hoy, para señalar cuáles conviene revisar primero.</p>
+<p class="text-muted small">Frutas y verduras no traen una fecha de caducidad impresa, ni ninguna marca que distinga a qué lote pertenece cada pieza una vez que están en el anaquel. Por eso el riesgo se muestra por producto, no por lote: se toma el lote más antiguo de cada producto (el peor caso) y se combina qué porcentaje de su propia vida útil lleva consumido (no días absolutos - un producto que dura 5 días y uno que dura 15 no se comparan igual) con el clima de hoy, para señalar cuáles conviene revisar primero.</p>
 
 {% if not clima_disponible %}
     <div class="alert alert-light border d-flex align-items-center gap-2 mb-3 py-2">
@@ -29,15 +29,14 @@
 
 <div class="card">
     <div class="card-body p-0">
-        {% if lotes %}
+        {% if filas %}
             <table class="table table-striped mb-0">
                 <thead>
                     <tr>
                         <th>UPC</th>
                         <th>Producto</th>
                         <th>Categoría</th>
-                        <th>Lote</th>
-                        <th>Cantidad</th>
+                        <th>Cantidad total</th>
                         <th>Días en exhibición</th>
                         <th>% de vida útil</th>
                         <th>Riesgo</th>
@@ -45,19 +44,21 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for l in lotes %}
+                    {% for f in filas %}
                     <tr>
-                        <td class="text-muted small">{{ l.producto_upc|default:"—" }}</td>
-                        <td>{{ l.producto }}</td>
-                        <td>{{ l.categoria }}</td>
-                        <td>{{ l.lote|default:"—" }}</td>
-                        <td>{% if l.unidad_medida == "PESO" %}{{ l.cantidad|floatformat:2 }} kg{% else %}{{ l.cantidad|floatformat:0 }} u.{% endif %}</td>
-                        <td>{{ l.dias_en_exhibicion }}</td>
-                        <td>{{ l.porcentaje_vida_util }}%</td>
-                        <td><span class="badge bg-{{ l.badge }}">{{ l.nivel }}</span></td>
+                        <td class="text-muted small">{{ f.producto_upc|default:"—" }}</td>
+                        <td>{{ f.producto }}</td>
+                        <td>{{ f.categoria }}</td>
+                        <td>
+                            {% if f.unidad_medida == "PESO" %}{{ f.cantidad_total|floatformat:2 }} kg{% else %}{{ f.cantidad_total|floatformat:0 }} u.{% endif %}
+                            <span class="text-muted small d-block">{{ f.num_lotes }} lote{{ f.num_lotes|pluralize }} · peor caso</span>
+                        </td>
+                        <td>{{ f.dias_en_exhibicion }}</td>
+                        <td>{{ f.porcentaje_vida_util }}%</td>
+                        <td><span class="badge bg-{{ f.badge }}">{{ f.nivel }}</span></td>
                         <td class="small">
-                            {% if l.aviso_proyeccion %}
-                                <span class="text-warning-emphasis">⚠️ {{ l.aviso_proyeccion }}</span>
+                            {% if f.aviso_proyeccion %}
+                                <span class="text-warning-emphasis">⚠️ {{ f.aviso_proyeccion }}</span>
                             {% else %}
                                 <span class="text-muted">Sin cambios previstos</span>
                             {% endif %}

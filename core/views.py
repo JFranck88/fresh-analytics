@@ -42,6 +42,12 @@ DIAS_QUINCENA = DIAS_QUINCENA_MEDIO + DIAS_FIN_DE_MES
 
 REGISTROS_POR_PAGINA = 25
 
+# Ventana de días hacia atrás que se usa para la "Tendencia de aprendizaje
+# del modelo" en Predicciones (petición del asesor de tesis, 2026-09-18):
+# suficiente para ver una tendencia real, sin acumular una gráfica
+# ilegible con meses de historial sintético.
+VENTANA_TENDENCIA_APRENDIZAJE_DIAS = 45
+
 DIAS_SEMANA_ES = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
 ]
@@ -149,6 +155,135 @@ def calcular_cantidad_sugerida(producto, fecha_prediccion_max, hoy):
         producto=producto, fecha_vencimiento__gte=hoy
     ).aggregate(total=Sum("cantidad"))["total"] or 0
     return max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
+
+
+def calcular_tendencia_aprendizaje(hoy):
+    """Petición del asesor de tesis (2026-09-18): en Predicciones no solo
+    mostrar lo que el modelo pronostica, también cómo va "aprendiendo" a
+    medida que se acumula más historial de ventas - la evidencia real de
+    que hay Machine Learning genuino detrás, no solo una gráfica de
+    pronóstico. Devuelve, por producto (más la clave "departamento" para
+    el agregado de todo el catálogo activo), dos series:
+
+    - precision: el MAPE (Prediccion.precision_modelo) de cada corrida
+      diaria del modelo, en el tiempo - responde "¿el margen de error
+      mejora o se mantiene a medida que el modelo entrena con más días
+      de venta real?".
+    - predicho_real: para cada día YA resuelto (ya pasó), lo que el
+      modelo pronosticó UN día antes (la corrida más inmediata para ese
+      día - la que de verdad se usó operativamente) contra la venta real
+      de ese mismo día - evidencia visual de qué tan cerca estuvo cada
+      pronóstico, no solo una cifra de error.
+
+    Todo limitado a VENTANA_TENDENCIA_APRENDIZAJE_DIAS para que la
+    gráfica no crezca sin límite. El agregado departamental se expresa en
+    quetzales (valor_predicho/venta real × precio_venta), igual que
+    "Venta esperada hoy" del dashboard, porque no tiene sentido sumar
+    kilogramos con unidades entre productos de categorías distintas."""
+    fecha_inicio = hoy - timedelta(days=VENTANA_TENDENCIA_APRENDIZAJE_DIAS)
+    productos = list(Producto.objects.filter(activo=True))
+    precio_por_producto = {p.id_producto: float(p.precio_venta) for p in productos}
+
+    # "A un día de anticipación": no es sencillo expresar de forma
+    # portable con el ORM "fecha_pronosticada - fecha_prediccion == 1
+    # día" restando dos DateField directamente en la base de datos, así
+    # que se trae la ventana completa y se filtra en Python.
+    predicho_1dia = {}
+    filas_prediccion = Prediccion.objects.filter(
+        fecha_pronosticada__gte=fecha_inicio, fecha_pronosticada__lt=hoy,
+    ).values("producto_id", "fecha_prediccion", "fecha_pronosticada", "valor_predicho")
+    for fila in filas_prediccion:
+        if (fila["fecha_pronosticada"] - fila["fecha_prediccion"]).days == 1:
+            predicho_1dia[(fila["producto_id"], fila["fecha_pronosticada"])] = fila["valor_predicho"]
+
+    real_por_dia = {}
+    filas_venta = (
+        Venta.objects.filter(fecha__date__gte=fecha_inicio, fecha__date__lt=hoy)
+        .annotate(dia=TruncDate("fecha"))
+        .values("producto_id", "dia")
+        .annotate(total=Sum("cantidad"))
+    )
+    for fila in filas_venta:
+        real_por_dia[(fila["producto_id"], fila["dia"])] = fila["total"]
+
+    precision_por_producto = {}
+    filas_precision = (
+        Prediccion.objects.filter(
+            fecha_prediccion__gte=fecha_inicio, precision_modelo__isnull=False,
+        )
+        .values("producto_id", "fecha_prediccion")
+        .annotate(mape=Avg("precision_modelo"))
+        .order_by("fecha_prediccion")
+    )
+    for fila in filas_precision:
+        precision_por_producto.setdefault(fila["producto_id"], []).append(
+            (fila["fecha_prediccion"], round(fila["mape"], 2))
+        )
+
+    resultado = {}
+    precision_dep_por_fecha = {}
+    predicho_dep_por_dia = {}
+    real_dep_por_dia = {}
+
+    for producto in productos:
+        pid = str(producto.id_producto)
+        precio = precio_por_producto[producto.id_producto]
+
+        puntos_precision = precision_por_producto.get(producto.id_producto, [])
+        for fecha, mape in puntos_precision:
+            precision_dep_por_fecha.setdefault(fecha, []).append(mape)
+
+        labels_pr_real = []
+        predicho_pr = []
+        real_pr = []
+        dia = fecha_inicio
+        while dia < hoy:
+            clave = (producto.id_producto, dia)
+            p_val = predicho_1dia.get(clave)
+            r_val = real_por_dia.get(clave)
+            if p_val is not None or r_val is not None:
+                labels_pr_real.append(dia.strftime("%d/%m"))
+                predicho_pr.append(p_val)
+                real_pr.append(r_val)
+                if p_val is not None:
+                    predicho_dep_por_dia[dia] = predicho_dep_por_dia.get(dia, 0) + p_val * precio
+                if r_val is not None:
+                    real_dep_por_dia[dia] = real_dep_por_dia.get(dia, 0) + r_val * precio
+            dia += timedelta(days=1)
+
+        resultado[pid] = {
+            "precision": {
+                "labels": [f.strftime("%d/%m") for f, _ in puntos_precision],
+                "valores": [m for _, m in puntos_precision],
+            },
+            "predicho_real": {
+                "labels": labels_pr_real, "predicho": predicho_pr, "real": real_pr,
+            },
+        }
+
+    labels_precision_dep = []
+    valores_precision_dep = []
+    for fecha in sorted(precision_dep_por_fecha):
+        valores = precision_dep_por_fecha[fecha]
+        labels_precision_dep.append(fecha.strftime("%d/%m"))
+        valores_precision_dep.append(round(sum(valores) / len(valores), 2))
+
+    dias_dep = sorted(set(predicho_dep_por_dia) | set(real_dep_por_dia))
+    resultado["departamento"] = {
+        "precision": {"labels": labels_precision_dep, "valores": valores_precision_dep},
+        "predicho_real": {
+            "labels": [d.strftime("%d/%m") for d in dias_dep],
+            "predicho": [
+                round(predicho_dep_por_dia[d], 2) if d in predicho_dep_por_dia else None
+                for d in dias_dep
+            ],
+            "real": [
+                round(real_dep_por_dia[d], 2) if d in real_dep_por_dia else None
+                for d in dias_dep
+            ],
+        },
+    }
+    return resultado
 
 
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
@@ -575,21 +710,40 @@ def riesgo_descomposicion(request):
     if producto_id:
         lotes_qs = lotes_qs.filter(producto_id=producto_id)
 
-    lotes = []
+    # Agrupado por producto, no por lote (decisión con Francisco,
+    # 2026-09-18): Frutas y Verduras no traen ninguna marca física de
+    # lote (a diferencia de Lácteos/Carnes, que sí traen fecha impresa),
+    # así que una vez que están en el anaquel es imposible saber a qué
+    # lote pertenece cada pieza. Mostrar el riesgo lote por lote no es
+    # accionable ahí - el Comprador no puede "revisar el lote
+    # L-20260906-8" a simple vista. La solución: una sola fila por
+    # producto, con la cantidad sumada entre todos sus lotes vigentes, y
+    # el riesgo calculado con el lote MÁS ANTIGUO (peor caso) - si no se
+    # pueden distinguir a simple vista, hay que asumir que cualquier
+    # pieza podría ser la más vieja del montón, no la más nueva.
+    lotes_por_producto = {}
     for lote in lotes_qs:
-        dias_en_exhibicion = (hoy - lote.fecha_ingreso).days
-        vida_util_dias = lote.producto.vida_util_dias
+        lotes_por_producto.setdefault(lote.producto_id, []).append(lote)
+
+    filas = []
+    for lotes_del_producto in lotes_por_producto.values():
+        producto = lotes_del_producto[0].producto
+        lote_mas_antiguo = min(lotes_del_producto, key=lambda l: l.fecha_ingreso)
+        cantidad_total = sum(l.cantidad for l in lotes_del_producto)
+
+        dias_en_exhibicion = (hoy - lote_mas_antiguo.fecha_ingreso).days
+        vida_util_dias = producto.vida_util_dias
         riesgo = calcular_riesgo_lote(dias_en_exhibicion, vida_util_dias, temp_max, humedad_promedio)
 
         # Proyección a los próximos días del pronóstico (petición de
         # Francisco): en vez de una tabla día por día, solo un aviso
         # corto para cuando el riesgo vaya a SUBIR de nivel respecto a
-        # hoy. Se proyecta como máximo hasta un día antes de que el
-        # propio lote llegue a su fecha_vencimiento - más allá de eso ya
-        # no debería seguir "en exhibición".
+        # hoy. Se proyecta usando el lote más antiguo (mismo criterio de
+        # peor caso), como máximo hasta un día antes de que ESE lote
+        # llegue a su fecha_vencimiento.
         dias_proyectados = []
         for fecha_futura in sorted(clima_por_dia):
-            if fecha_futura <= hoy or fecha_futura >= lote.fecha_vencimiento:
+            if fecha_futura <= hoy or fecha_futura >= lote_mas_antiguo.fecha_vencimiento:
                 continue
             offset = (fecha_futura - hoy).days
             datos_dia = clima_por_dia[fecha_futura]
@@ -610,23 +764,22 @@ def riesgo_descomposicion(request):
                 f"({dia_que_sube['fecha'].strftime('%d/%m')})"
             )
 
-        lotes.append({
-            "lote": lote.lote,
-            "producto": lote.producto.nombre,
-            "producto_upc": lote.producto.codigo_upc,
-            "categoria": lote.producto.get_categoria_display(),
-            "cantidad": lote.cantidad,
-            "unidad_medida": lote.producto.unidad_medida,
-            "fecha_ingreso": lote.fecha_ingreso,
+        filas.append({
+            "producto": producto.nombre,
+            "producto_upc": producto.codigo_upc,
+            "categoria": producto.get_categoria_display(),
+            "cantidad_total": cantidad_total,
+            "num_lotes": len(lotes_del_producto),
+            "unidad_medida": producto.unidad_medida,
             "dias_en_exhibicion": dias_en_exhibicion,
             "aviso_proyeccion": aviso_proyeccion,
             **riesgo,
         })
 
-    lotes.sort(key=lambda fila: fila["puntaje"], reverse=True)
+    filas.sort(key=lambda fila: fila["puntaje"], reverse=True)
 
     contexto = {
-        "lotes": lotes,
+        "filas": filas,
         "temp_max": temp_max,
         "humedad_promedio": humedad_promedio,
         "clima_disponible": temp_max is not None or humedad_promedio is not None,
@@ -665,6 +818,14 @@ def listar_predicciones(request):
     datos_grafica = {}
     info_productos = {}
     info_dias = {}
+    # Requerimiento de Francisco (2026-09-18): al entrar a Predicciones sin
+    # haber buscado nada todavía, la primera gráfica es la del DEPARTAMENTO
+    # completo, no la de un producto elegido al azar (antes se auto-
+    # seleccionaba el primero alfabéticamente sin ningún criterio de
+    # negocio). Se agrega en quetzales, no en unidades/kg - esos no se
+    # pueden sumar entre productos de categorías distintas - mismo
+    # criterio que "Venta esperada hoy" del dashboard.
+    departamento_por_fecha = {}
     for p in predicciones:
         pid = str(p.producto.id_producto)
         if pid not in datos_grafica:
@@ -682,6 +843,14 @@ def listar_predicciones(request):
         datos_grafica[pid]["inferior"].append(float(p.intervalo_inferior))
         datos_grafica[pid]["superior"].append(float(p.intervalo_superior))
         datos_grafica[pid]["fechas"].append(fecha_iso)
+
+        precio = float(p.producto.precio_venta)
+        agregados_dep = departamento_por_fecha.setdefault(
+            fecha, {"predicho": 0.0, "inferior": 0.0, "superior": 0.0}
+        )
+        agregados_dep["predicho"] += float(p.valor_predicho) * precio
+        agregados_dep["inferior"] += float(p.intervalo_inferior) * precio
+        agregados_dep["superior"] += float(p.intervalo_superior) * precio
 
         if fecha_iso not in info_dias:
             clima_dia = clima_por_dia.get(fecha, {})
@@ -703,6 +872,15 @@ def listar_predicciones(request):
         if prob >= 0.4:
             dias_lluvia.append(fecha.strftime("%d/%m"))
 
+    datos_departamento = {"labels": [], "predicho": [], "inferior": [], "superior": [], "fechas": []}
+    for fecha in sorted(departamento_por_fecha):
+        agregados_dep = departamento_por_fecha[fecha]
+        datos_departamento["labels"].append(fecha.strftime("%d/%m"))
+        datos_departamento["fechas"].append(fecha.isoformat())
+        datos_departamento["predicho"].append(round(agregados_dep["predicho"], 2))
+        datos_departamento["inferior"].append(round(agregados_dep["inferior"], 2))
+        datos_departamento["superior"].append(round(agregados_dep["superior"], 2))
+
     dias_desde_prediccion = (hoy - fecha_max).days if fecha_max else None
 
     return render(request, "listar_predicciones.html", {
@@ -710,10 +888,15 @@ def listar_predicciones(request):
         "fecha_corrida": fecha_max,
         "modelo_al_dia": dias_desde_prediccion == 0,
         "datos_grafica_json": json.dumps(datos_grafica),
+        "datos_departamento_json": json.dumps(datos_departamento),
         "info_productos_json": json.dumps(info_productos),
         "info_dias_json": json.dumps(info_dias),
         "mensajes_contexto": mensajes_contexto,
         "dias_lluvia_json": json.dumps(dias_lluvia),
+        # Petición del asesor de tesis (ver calcular_tendencia_aprendizaje):
+        # tendencia de MAPE y predicho-vs-real en el tiempo, por producto
+        # y para el departamento completo.
+        "tendencia_aprendizaje_json": json.dumps(calcular_tendencia_aprendizaje(hoy)),
     })
 
 

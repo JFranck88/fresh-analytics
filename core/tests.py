@@ -1030,6 +1030,169 @@ class PrediccionesDetalleDiaTests(TestCase):
         self.assertEqual(len(datos_grafica[pid]["fechas"]), len(datos_grafica[pid]["labels"]))
 
 
+class PrediccionesDepartamentoTests(TestCase):
+    """Requerimiento de Francisco (2026-09-18): al entrar a Predicciones
+    sin haber buscado nada todavía, la primera gráfica es la del
+    DEPARTAMENTO completo, en quetzales (no se pueden sumar kg con
+    unidades entre productos de categorías distintas) - mismo criterio
+    que "Venta esperada hoy" del dashboard."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("depto.comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.producto1 = crear_producto(precio_venta=8.0)
+        self.producto2 = crear_producto(
+            nombre="Yogurt natural", upc="7501234500199", precio_venta=5.0,
+        )
+        self.client.force_login(self.comprador)
+
+    def _datos_departamento(self, respuesta):
+        return json.loads(respuesta.context["datos_departamento_json"])
+
+    def test_suma_el_valor_de_todo_el_catalogo_en_quetzales(self):
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.producto1, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+        )
+        Prediccion.objects.create(
+            producto=self.producto2, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=4, intervalo_inferior=2, intervalo_superior=6,
+        )
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        datos = self._datos_departamento(respuesta)
+        indice = datos["fechas"].index(hoy.isoformat())
+        # 10*8.0 + 4*5.0 = 100.00
+        self.assertEqual(datos["predicho"][indice], 100.0)
+        # (5*8.0)+(2*5.0)=50.0 ; (15*8.0)+(6*5.0)=150.0
+        self.assertEqual(datos["inferior"][indice], 50.0)
+        self.assertEqual(datos["superior"][indice], 150.0)
+
+    def test_ignora_corridas_anteriores_a_la_mas_reciente(self):
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.producto1, fecha_prediccion=hoy - timedelta(days=1), fecha_pronosticada=hoy,
+            valor_predicho=999, intervalo_inferior=1, intervalo_superior=1,
+        )
+        Prediccion.objects.create(
+            producto=self.producto1, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+        )
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        datos = self._datos_departamento(respuesta)
+        self.assertEqual(datos["predicho"], [80.0])
+
+    def test_vacio_sin_predicciones(self):
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        datos = self._datos_departamento(respuesta)
+        self.assertEqual(datos["labels"], [])
+        self.assertEqual(datos["predicho"], [])
+
+    def test_pantalla_muestra_el_titulo_de_departamento_por_defecto(self):
+        respuesta = self.client.get(reverse("listar_predicciones"))
+        self.assertContains(respuesta, "Tendencia de predicción del Departamento completo")
+
+
+class TendenciaAprendizajeModeloTests(TestCase):
+    """Petición del asesor de tesis (2026-09-18): en Predicciones, no solo
+    mostrar lo que el modelo pronostica, también cómo va aprendiendo con
+    más historial - MAPE por corrida en el tiempo, y lo pronosticado un
+    día antes contra la venta real, día a día. Pruebas directas de
+    `calcular_tendencia_aprendizaje` (core/views.py), sin pasar por la
+    vista completa, para aislar el cálculo de la plantilla."""
+
+    def setUp(self):
+        self.producto = crear_producto(precio_venta=8.0)
+
+    def test_precision_por_producto_en_el_tiempo(self):
+        from .views import calcular_tendencia_aprendizaje
+
+        hoy = timezone.localdate()
+        ayer = hoy - timedelta(days=1)
+        anteayer = hoy - timedelta(days=2)
+        for fecha, mape in [(anteayer, 20.0), (ayer, 15.0)]:
+            Prediccion.objects.create(
+                producto=self.producto, fecha_prediccion=fecha, fecha_pronosticada=fecha,
+                valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+                precision_modelo=mape,
+            )
+        resultado = calcular_tendencia_aprendizaje(hoy)
+        pid = str(self.producto.id_producto)
+        self.assertEqual(resultado[pid]["precision"]["valores"], [20.0, 15.0])
+
+    def test_ignora_corridas_sin_mape(self):
+        from .views import calcular_tendencia_aprendizaje
+
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+            precision_modelo=None,
+        )
+        resultado = calcular_tendencia_aprendizaje(hoy)
+        pid = str(self.producto.id_producto)
+        self.assertEqual(resultado[pid]["precision"]["valores"], [])
+
+    def test_predicho_vs_real_usa_solo_la_corrida_de_un_dia_antes(self):
+        from .views import calcular_tendencia_aprendizaje
+
+        hoy = timezone.localdate()
+        ayer = hoy - timedelta(days=1)
+        anteayer = hoy - timedelta(days=2)
+        # Corrida de "un día antes" para el día de ayer: debe ser la que se usa.
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=anteayer, fecha_pronosticada=ayer,
+            valor_predicho=12, intervalo_inferior=6, intervalo_superior=18,
+        )
+        # Corrida con más anticipación para el MISMO día - no debe usarse.
+        Prediccion.objects.create(
+            producto=self.producto,
+            fecha_prediccion=hoy - timedelta(days=5), fecha_pronosticada=ayer,
+            valor_predicho=999, intervalo_inferior=1, intervalo_superior=1,
+        )
+        Venta.objects.create(
+            producto=self.producto, fecha=timezone.now() - timedelta(days=1),
+            cantidad=10, precio_unitario=8.0,
+        )
+        resultado = calcular_tendencia_aprendizaje(hoy)
+        pid = str(self.producto.id_producto)
+        indice = resultado[pid]["predicho_real"]["labels"].index(ayer.strftime("%d/%m"))
+        self.assertEqual(resultado[pid]["predicho_real"]["predicho"][indice], 12)
+        self.assertEqual(resultado[pid]["predicho_real"]["real"][indice], 10.0)
+
+    def test_departamento_agrega_en_quetzales(self):
+        from .views import calcular_tendencia_aprendizaje
+
+        hoy = timezone.localdate()
+        ayer = hoy - timedelta(days=1)
+        anteayer = hoy - timedelta(days=2)
+        producto2 = crear_producto(
+            nombre="Yogurt natural", upc="7501234500299", precio_venta=5.0,
+        )
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=anteayer, fecha_pronosticada=ayer,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+        )
+        Prediccion.objects.create(
+            producto=producto2, fecha_prediccion=anteayer, fecha_pronosticada=ayer,
+            valor_predicho=4, intervalo_inferior=2, intervalo_superior=6,
+        )
+        resultado = calcular_tendencia_aprendizaje(hoy)
+        indice = resultado["departamento"]["predicho_real"]["labels"].index(ayer.strftime("%d/%m"))
+        # 10*8.0 + 4*5.0 = 100.0
+        self.assertEqual(resultado["departamento"]["predicho_real"]["predicho"][indice], 100.0)
+
+    def test_sin_historial_devuelve_series_vacias_sin_error(self):
+        from .views import calcular_tendencia_aprendizaje
+
+        resultado = calcular_tendencia_aprendizaje(timezone.localdate())
+        pid = str(self.producto.id_producto)
+        self.assertEqual(resultado[pid]["precision"], {"labels": [], "valores": []})
+        self.assertEqual(
+            resultado[pid]["predicho_real"], {"labels": [], "predicho": [], "real": []}
+        )
+        self.assertIn("departamento", resultado)
+
+
 class CalcularRiesgoLoteTests(TestCase):
     """Pruebas puras del cálculo de riesgo climático de descomposición
     (core/riesgo_descomposicion.py) - no dependen de la base de datos ni
@@ -1186,7 +1349,7 @@ class RiesgoDescomposicionVistaTests(TestCase):
     @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_solo_incluye_frutas_y_verduras(self, _mock_clima):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        productos_mostrados = [l["producto"] for l in respuesta.context["lotes"]]
+        productos_mostrados = [l["producto"] for l in respuesta.context["filas"]]
         self.assertIn("Manzana roja", productos_mostrados)
         self.assertNotIn("Leche entera 1L", productos_mostrados)
 
@@ -1196,21 +1359,24 @@ class RiesgoDescomposicionVistaTests(TestCase):
         # del historial sintético (fecha_ingreso de hace años, nunca
         # "consumidos") aparecían con cientos de días en exhibición - algo
         # imposible en la vida real. Un lote cuya fecha_vencimiento ya pasó
-        # no debe aparecer aquí (ya lo cubre la alerta de Vencimiento).
+        # no debe aparecer aquí (ya lo cubre la alerta de Vencimiento), ni
+        # siquiera para inflar la cantidad total o los días en exhibición
+        # del producto agrupado.
         hoy = timezone.localdate()
         Inventario.objects.create(
             producto=self.manzana, fecha_ingreso=hoy - timedelta(days=744),
             fecha_vencimiento=hoy - timedelta(days=729), cantidad=80, lote="L-VIEJO",
         )
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        lotes_mostrados = [l["lote"] for l in respuesta.context["lotes"]]
-        self.assertIn("L1", lotes_mostrados)
-        self.assertNotIn("L-VIEJO", lotes_mostrados)
+        fila_manzana = next(f for f in respuesta.context["filas"] if f["producto"] == "Manzana roja")
+        self.assertEqual(fila_manzana["num_lotes"], 1)
+        self.assertEqual(fila_manzana["cantidad_total"], 10)
+        self.assertEqual(fila_manzana["dias_en_exhibicion"], 6)
 
     @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_calcula_dias_en_exhibicion_desde_fecha_ingreso(self, _mock_clima):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        fila = respuesta.context["lotes"][0]
+        fila = respuesta.context["filas"][0]
         self.assertEqual(fila["dias_en_exhibicion"], 6)
 
     @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
@@ -1220,7 +1386,7 @@ class RiesgoDescomposicionVistaTests(TestCase):
         self.assertFalse(respuesta.context["clima_disponible"])
         # Con 6 días en exhibición y sin clima, el puntaje viene solo de
         # PUNTOS_POR_DIAS_EXHIBICION (45) -> nivel MEDIO.
-        self.assertEqual(respuesta.context["lotes"][0]["nivel"], "MEDIO")
+        self.assertEqual(respuesta.context["filas"][0]["nivel"], "MEDIO")
 
     @patch("core.views.pronostico_temperatura_humedad_por_dia")
     def test_con_clima_disponible_sube_el_riesgo(self, mock_clima):
@@ -1228,7 +1394,7 @@ class RiesgoDescomposicionVistaTests(TestCase):
         mock_clima.return_value = {hoy: {"temp_max": 32.0, "humedad_promedio": 85.0}}
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
         self.assertTrue(respuesta.context["clima_disponible"])
-        self.assertEqual(respuesta.context["lotes"][0]["nivel"], "ALTO")
+        self.assertEqual(respuesta.context["filas"][0]["nivel"], "ALTO")
 
     @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_no_afecta_fecha_vencimiento_del_inventario(self, _mock_clima):
@@ -1251,7 +1417,7 @@ class RiesgoDescomposicionVistaTests(TestCase):
             mañana: {"temp_max": 35.0, "humedad_promedio": 90.0},
         }
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        fila = respuesta.context["lotes"][0]
+        fila = respuesta.context["filas"][0]
         self.assertEqual(fila["nivel"], "MEDIO")
         self.assertIsNotNone(fila["aviso_proyeccion"])
         self.assertIn("ALTO", fila["aviso_proyeccion"])
@@ -1263,7 +1429,7 @@ class RiesgoDescomposicionVistaTests(TestCase):
         # Clima templado de mañana: no alcanza a mover el nivel de MEDIO.
         mock_clima.return_value = {mañana: {"temp_max": 18.0, "humedad_promedio": 40.0}}
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        fila = respuesta.context["lotes"][0]
+        fila = respuesta.context["filas"][0]
         self.assertIsNone(fila["aviso_proyeccion"])
 
     @patch("core.views.pronostico_temperatura_humedad_por_dia")
@@ -1275,7 +1441,7 @@ class RiesgoDescomposicionVistaTests(TestCase):
         dia_lejano = hoy + timedelta(days=5)
         mock_clima.return_value = {dia_lejano: {"temp_max": 40.0, "humedad_promedio": 95.0}}
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        fila = respuesta.context["lotes"][0]
+        fila = respuesta.context["filas"][0]
         self.assertIsNone(fila["aviso_proyeccion"])
 
 
@@ -1317,14 +1483,14 @@ class RiesgoDescomposicionFiltroPorProductoTests(TestCase):
     @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_filtra_solo_el_producto_pedido(self, _mock_clima):
         respuesta = self.client.get(reverse("riesgo_descomposicion"), {"producto": self.manzana.id_producto})
-        lotes_mostrados = [l["producto"] for l in respuesta.context["lotes"]]
+        lotes_mostrados = [l["producto"] for l in respuesta.context["filas"]]
         self.assertEqual(lotes_mostrados, ["Manzana roja"])
         self.assertEqual(respuesta.context["producto_filtro"], self.manzana)
 
     @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
     def test_sin_filtro_muestra_todos_como_antes(self, _mock_clima):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        lotes_mostrados = {l["producto"] for l in respuesta.context["lotes"]}
+        lotes_mostrados = {l["producto"] for l in respuesta.context["filas"]}
         self.assertEqual(lotes_mostrados, {"Manzana roja", "Lechuga"})
         self.assertIsNone(respuesta.context["producto_filtro"])
 
@@ -1334,9 +1500,58 @@ class RiesgoDescomposicionFiltroPorProductoTests(TestCase):
         # (tabla vacía sin explicación) - esta pantalla es exclusiva de
         # Frutas/Verduras, y hay que decir por qué no aparece nada.
         respuesta = self.client.get(reverse("riesgo_descomposicion"), {"producto": self.leche.id_producto})
-        self.assertEqual(list(respuesta.context["lotes"]), [])
+        self.assertEqual(list(respuesta.context["filas"]), [])
         self.assertTrue(respuesta.context["producto_fuera_de_alcance"])
         self.assertContains(respuesta, "solo aplica a Frutas y Verduras")
+
+
+class RiesgoDescomposicionAgrupadoPorProductoTests(TestCase):
+    """Cambio decidido con Francisco (2026-09-18): Frutas y Verduras no
+    traen ninguna marca física de lote, así que una vez en el anaquel es
+    imposible saber a qué lote pertenece cada pieza - mostrar el riesgo
+    lote por lote no es accionable. Ahora se agrupa por producto: una
+    sola fila, cantidad sumada entre todos los lotes vigentes, y el
+    riesgo calculado con el lote MÁS ANTIGUO (peor caso)."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("riesgo.grupo.comprador@test.com", Usuario.Rol.COMPRADOR)
+        hoy = timezone.localdate()
+
+        self.tomate = crear_producto(
+            nombre="Tomate de riñón", upc="8888888888",
+            categoria=Producto.Categoria.VERDURAS, vida_util_dias=10,
+        )
+        # Lote más nuevo (bajo riesgo si se mirara solo).
+        Inventario.objects.create(
+            producto=self.tomate, fecha_ingreso=hoy - timedelta(days=2),
+            fecha_vencimiento=hoy + timedelta(days=8), cantidad=10, lote="L-NUEVO",
+        )
+        # Lote más antiguo (peor caso) - debe ser el que domine el cálculo.
+        Inventario.objects.create(
+            producto=self.tomate, fecha_ingreso=hoy - timedelta(days=6),
+            fecha_vencimiento=hoy + timedelta(days=4), cantidad=15, lote="L-VIEJO",
+        )
+        self.client.force_login(self.comprador)
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_una_sola_fila_por_producto(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        filas_tomate = [f for f in respuesta.context["filas"] if f["producto"] == "Tomate de riñón"]
+        self.assertEqual(len(filas_tomate), 1)
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_cantidad_total_suma_todos_los_lotes_vigentes(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        fila = next(f for f in respuesta.context["filas"] if f["producto"] == "Tomate de riñón")
+        self.assertEqual(fila["cantidad_total"], 25)
+        self.assertEqual(fila["num_lotes"], 2)
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_usa_el_lote_mas_antiguo_como_peor_caso(self, _mock_clima):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        fila = next(f for f in respuesta.context["filas"] if f["producto"] == "Tomate de riñón")
+        # 6 días de exhibición del lote más antiguo, no 2 del más nuevo.
+        self.assertEqual(fila["dias_en_exhibicion"], 6)
 
 
 class ListarMermasFiltroPorProductoTests(TestCase):
