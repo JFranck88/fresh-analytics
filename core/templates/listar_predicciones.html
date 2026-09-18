@@ -18,7 +18,7 @@
 <div class="card mb-4">
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-            <h6 class="mb-0" id="titulo-grafica-prediccion">Tendencia de predicción del Departamento completo</h6>
+            <h6 class="mb-0" id="titulo-grafica-prediccion">Tendencia de predicción del Departamento Alimentos Frescos</h6>
             <div class="d-flex gap-2">
                 <input type="text" id="buscar-upc-prediccion" class="form-control form-control-sm" style="width: 120px;" placeholder="UPC" inputmode="numeric" autocomplete="off">
                 <input type="text" id="buscar-desc-prediccion" class="form-control form-control-sm" style="width: 180px;" placeholder="Descripción" autocomplete="off">
@@ -26,8 +26,8 @@
         </div>
         <div id="resultados-prediccion" class="list-group mb-2"></div>
         <p class="text-muted small mb-2">
-            Mostrando: <strong id="producto-actual-texto">Departamento completo (todos los productos)</strong>
-            <a href="#" id="volver-departamento" class="small ms-2 d-none">· Ver departamento completo</a>
+            Mostrando: <strong id="producto-actual-texto">Departamento Alimentos Frescos (todos los productos)</strong>
+            <a href="#" id="volver-departamento" class="small ms-2 d-none">· Ver Departamento Alimentos Frescos</a>
         </p>
         <canvas id="grafica-prediccion" height="90"></canvas>
         <p class="text-muted small mt-2 mb-0">Haz clic en un punto de la gráfica para ver el detalle de ese día.</p>
@@ -42,7 +42,6 @@
     const infoProductos = {{ info_productos_json|safe }};
     const diasLluvia = {{ dias_lluvia_json|safe }};
     const infoDias = {{ info_dias_json|safe }};
-    const tendenciaAprendizaje = {{ tendencia_aprendizaje_json|safe }};
     const detalleDiaPrediccion = document.getElementById('detalle-dia-prediccion');
 
     const inputUpcPrediccion = document.getElementById('buscar-upc-prediccion');
@@ -91,7 +90,6 @@
         productoActualTexto.textContent = etiquetaProducto(pid);
         volverDepartamento.classList.remove('d-none');
         dibujar(pid);
-        dibujarAprendizaje(pid, etiquetaEjeY(pid));
         filtrarTabla(pid);
         resultadosPrediccion.innerHTML = '';
         inputUpcPrediccion.value = '';
@@ -108,11 +106,10 @@
     // funcionaba). Reutiliza el mismo canvas y las mismas funciones de
     // dibujo que un producto puntual, con datos agregados.
     function mostrarDepartamento() {
-        tituloGraficaPrediccion.textContent = 'Tendencia de predicción del Departamento completo';
-        productoActualTexto.textContent = 'Departamento completo (todos los productos)';
+        tituloGraficaPrediccion.textContent = 'Tendencia de predicción del Departamento Alimentos Frescos';
+        productoActualTexto.textContent = 'Departamento Alimentos Frescos (todos los productos)';
         volverDepartamento.classList.add('d-none');
         dibujar(null);
-        dibujarAprendizaje('departamento', 'Venta estimada del departamento (Q)');
         mostrarTodaLaTabla();
         const parametros = new URLSearchParams(window.location.search);
         parametros.delete('producto');
@@ -261,83 +258,6 @@
         });
     }
 
-    // Petición del asesor de tesis (2026-09-18): no solo mostrar lo que
-    // el modelo predice, también cómo va aprendiendo con más historial.
-    // Dos gráficas por clave (id de producto, o "departamento"): el
-    // margen de error (MAPE) corrida tras corrida, y lo pronosticado un
-    // día antes contra la venta real, día a día.
-    let chartPrecisionTendencia;
-    let chartPredichoReal;
-    function dibujarAprendizaje(clave, etiquetaValor) {
-        const datos = tendenciaAprendizaje[clave] || {
-            precision: { labels: [], valores: [] },
-            predicho_real: { labels: [], predicho: [], real: [] },
-        };
-
-        if (chartPrecisionTendencia) chartPrecisionTendencia.destroy();
-        const ctxPrecision = document.getElementById('grafica-precision-tendencia').getContext('2d');
-        chartPrecisionTendencia = new Chart(ctxPrecision, {
-            type: 'line',
-            data: {
-                labels: datos.precision.labels,
-                datasets: [{
-                    label: 'Margen de error (MAPE %)',
-                    data: datos.precision.valores,
-                    borderColor: '#E67E22',
-                    backgroundColor: '#E67E22',
-                    borderWidth: 2,
-                    tension: 0.3,
-                    pointRadius: 3,
-                }],
-            },
-            options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: { y: { beginAtZero: true, title: { display: true, text: '% de error' } } },
-            },
-        });
-
-        if (chartPredichoReal) chartPredichoReal.destroy();
-        const ctxPredichoReal = document.getElementById('grafica-predicho-real').getContext('2d');
-        chartPredichoReal = new Chart(ctxPredichoReal, {
-            type: 'line',
-            data: {
-                labels: datos.predicho_real.labels,
-                datasets: [
-                    {
-                        label: 'Pronosticado (1 día antes)',
-                        data: datos.predicho_real.predicho,
-                        borderColor: '#52B788',
-                        backgroundColor: '#52B788',
-                        borderWidth: 2,
-                        tension: 0.3,
-                        pointRadius: 3,
-                        borderDash: [6, 3],
-                    },
-                    {
-                        label: 'Venta real',
-                        data: datos.predicho_real.real,
-                        borderColor: '#1B4332',
-                        backgroundColor: '#1B4332',
-                        borderWidth: 2,
-                        tension: 0.3,
-                        pointRadius: 3,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                plugins: { legend: { display: true, position: 'bottom' } },
-                scales: { y: { beginAtZero: true, title: { display: true, text: etiquetaValor } } },
-            },
-        });
-
-        const sinDatos = !datos.precision.labels.length && !datos.predicho_real.labels.length;
-        document.getElementById('nota-aprendizaje').textContent = sinDatos
-            ? 'Aún no hay suficiente historial de corridas diarias para mostrar esta tendencia - se irá llenando con cada día que pase.'
-            : '';
-    }
-
     // La selección inicial (por ejemplo, al llegar desde el buscador con
     // ?producto=X) necesita que la <table> de abajo YA exista en el DOM,
     // porque filtrarTabla() busca sus filas con querySelectorAll. Este
@@ -362,24 +282,6 @@
         }
     });
 </script>
-
-<div class="card mb-4">
-    <div class="card-body">
-        <h6 class="mb-1">Tendencia de aprendizaje del modelo</h6>
-        <p class="text-muted small mb-3">Petición del asesor de tesis: no solo mostrar lo que el modelo predice, también cómo va aprendiendo a medida que se acumula más historial de ventas - la evidencia de que hay Machine Learning real detrás, no solo una gráfica de pronóstico.</p>
-        <div class="row">
-            <div class="col-md-6 mb-3 mb-md-0">
-                <p class="text-muted small mb-1">Margen de error (MAPE) por corrida del modelo</p>
-                <canvas id="grafica-precision-tendencia" height="180"></canvas>
-            </div>
-            <div class="col-md-6">
-                <p class="text-muted small mb-1">Pronóstico (1 día antes) vs. venta real, día a día</p>
-                <canvas id="grafica-predicho-real" height="180"></canvas>
-            </div>
-        </div>
-        <p class="text-muted small mt-2 mb-0" id="nota-aprendizaje"></p>
-    </div>
-</div>
 
 <div class="card mb-4">
     <div class="card-body p-0">

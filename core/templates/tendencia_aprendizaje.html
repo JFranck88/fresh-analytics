@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block content %}
+<h5 class="mb-1">Tendencia de aprendizaje del modelo</h5>
+<p class="text-muted small">Petición del asesor de tesis: no solo mostrar lo que el modelo predice, también cómo va aprendiendo a medida que se acumula más historial de ventas - la evidencia de que hay Machine Learning real detrás, no solo una gráfica de pronóstico. Módulo aparte de Predicciones (decisión de Francisco, 2026-09-18): esta vista es para sustentar la tesis ante Gerencia/Administración, no para el uso operativo diario del Comprador.</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <h6 class="mb-0" id="titulo-tendencia-aprendizaje">Departamento Alimentos Frescos</h6>
+            <div class="d-flex gap-2">
+                <input type="text" id="buscar-upc-aprendizaje" class="form-control form-control-sm" style="width: 120px;" placeholder="UPC" inputmode="numeric" autocomplete="off">
+                <input type="text" id="buscar-desc-aprendizaje" class="form-control form-control-sm" style="width: 180px;" placeholder="Descripción" autocomplete="off">
+            </div>
+        </div>
+        <div id="resultados-aprendizaje" class="list-group mb-2"></div>
+        <p class="text-muted small mb-2">
+            Mostrando: <strong id="producto-actual-aprendizaje-texto">Departamento Alimentos Frescos (todos los productos)</strong>
+            <a href="#" id="volver-departamento-aprendizaje" class="small ms-2 d-none">· Ver Departamento Alimentos Frescos</a>
+        </p>
+        <div class="row">
+            <div class="col-md-6 mb-3 mb-md-0">
+                <p class="text-muted small mb-1">Margen de error (MAPE) por corrida del modelo</p>
+                <canvas id="grafica-precision-tendencia" height="180"></canvas>
+            </div>
+            <div class="col-md-6">
+                <p class="text-muted small mb-1">Pronóstico (1 día antes) vs. venta real, día a día</p>
+                <canvas id="grafica-predicho-real" height="180"></canvas>
+            </div>
+        </div>
+        <p class="text-muted small mt-2 mb-0" id="nota-aprendizaje"></p>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+    const tendenciaAprendizaje = {{ tendencia_aprendizaje_json|safe }};
+    const infoProductos = {{ info_productos_json|safe }};
+
+    const inputUpc = document.getElementById('buscar-upc-aprendizaje');
+    const inputDesc = document.getElementById('buscar-desc-aprendizaje');
+    const resultados = document.getElementById('resultados-aprendizaje');
+    const productoActualTexto = document.getElementById('producto-actual-aprendizaje-texto');
+    const tituloTendencia = document.getElementById('titulo-tendencia-aprendizaje');
+    const volverDepartamento = document.getElementById('volver-departamento-aprendizaje');
+    let temporizador;
+
+    function etiquetaProducto(pid) {
+        const info = infoProductos[pid] || {};
+        return `${info.upc || '—'} — ${info.nombre || pid}`;
+    }
+
+    // Mismo criterio que Predicciones: el agregado de departamento se
+    // expresa en quetzales (no se pueden sumar kg con unidades entre
+    // productos distintos); por producto, en sus propias unidades.
+    function etiquetaValor(pid) {
+        if (pid === 'departamento') return 'Venta estimada del departamento (Q)';
+        const info = infoProductos[pid] || {};
+        return info.unidad_medida === 'PESO' ? 'Kg de venta esperados' : 'Unidades de venta esperadas';
+    }
+
+    function buscarProductoLocal() {
+        const upc = inputUpc.value.trim().toLowerCase();
+        const q = inputDesc.value.trim().toLowerCase();
+        resultados.innerHTML = '';
+        if (!upc && !q) return;
+
+        const coincidencias = Object.keys(infoProductos).filter(pid => {
+            const info = infoProductos[pid];
+            const okUpc = !upc || (info.upc || '').toLowerCase().includes(upc);
+            const okDesc = !q || (info.nombre || '').toLowerCase().includes(q);
+            return okUpc && okDesc;
+        });
+
+        if (!coincidencias.length) {
+            resultados.innerHTML = '<div class="list-group-item text-muted small">Sin coincidencias.</div>';
+            return;
+        }
+        coincidencias.forEach(pid => {
+            const info = infoProductos[pid];
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'list-group-item list-group-item-action d-flex gap-3';
+            item.innerHTML = `<span class="text-muted small" style="width: 90px;">${info.upc || '—'}</span><span>${info.nombre}</span>`;
+            item.addEventListener('click', () => seleccionarProducto(pid));
+            resultados.appendChild(item);
+        });
+    }
+
+    function seleccionarProducto(pid) {
+        tituloTendencia.textContent = etiquetaProducto(pid);
+        productoActualTexto.textContent = etiquetaProducto(pid);
+        volverDepartamento.classList.remove('d-none');
+        dibujarAprendizaje(pid, etiquetaValor(pid));
+        resultados.innerHTML = '';
+        inputUpc.value = '';
+        inputDesc.value = '';
+        const parametros = new URLSearchParams(window.location.search);
+        parametros.set('producto', pid);
+        history.replaceState(null, '', '?' + parametros.toString());
+    }
+
+    function mostrarDepartamento() {
+        tituloTendencia.textContent = 'Departamento Alimentos Frescos';
+        productoActualTexto.textContent = 'Departamento Alimentos Frescos (todos los productos)';
+        volverDepartamento.classList.add('d-none');
+        dibujarAprendizaje('departamento', etiquetaValor('departamento'));
+        const parametros = new URLSearchParams(window.location.search);
+        parametros.delete('producto');
+        const query = parametros.toString();
+        history.replaceState(null, '', query ? '?' + query : window.location.pathname);
+    }
+
+    volverDepartamento.addEventListener('click', function (e) {
+        e.preventDefault();
+        mostrarDepartamento();
+    });
+
+    inputUpc.addEventListener('input', () => { clearTimeout(temporizador); temporizador = setTimeout(buscarProductoLocal, 150); });
+    inputDesc.addEventListener('input', () => { clearTimeout(temporizador); temporizador = setTimeout(buscarProductoLocal, 150); });
+
+    function manejarEnter(e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const primero = resultados.querySelector('button');
+        if (primero) primero.click();
+    }
+    inputUpc.addEventListener('keydown', manejarEnter);
+    inputDesc.addEventListener('keydown', manejarEnter);
+
+    // Petición del asesor de tesis (2026-09-18): no solo mostrar lo que
+    // el modelo predice, también cómo va aprendiendo con más historial.
+    // Dos gráficas por clave (id de producto, o "departamento"): el
+    // margen de error (MAPE) corrida tras corrida, y lo pronosticado un
+    // día antes contra la venta real, día a día.
+    let chartPrecisionTendencia;
+    let chartPredichoReal;
+    function dibujarAprendizaje(clave, etiquetaEjeY) {
+        const datos = tendenciaAprendizaje[clave] || {
+            precision: { labels: [], valores: [] },
+            predicho_real: { labels: [], predicho: [], real: [] },
+        };
+
+        if (chartPrecisionTendencia) chartPrecisionTendencia.destroy();
+        const ctxPrecision = document.getElementById('grafica-precision-tendencia').getContext('2d');
+        chartPrecisionTendencia = new Chart(ctxPrecision, {
+            type: 'line',
+            data: {
+                labels: datos.precision.labels,
+                datasets: [{
+                    label: 'Margen de error (MAPE %)',
+                    data: datos.precision.valores,
+                    borderColor: '#E67E22',
+                    backgroundColor: '#E67E22',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    pointRadius: 3,
+                }],
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, title: { display: true, text: '% de error' } } },
+            },
+        });
+
+        if (chartPredichoReal) chartPredichoReal.destroy();
+        const ctxPredichoReal = document.getElementById('grafica-predicho-real').getContext('2d');
+        chartPredichoReal = new Chart(ctxPredichoReal, {
+            type: 'line',
+            data: {
+                labels: datos.predicho_real.labels,
+                datasets: [
+                    {
+                        label: 'Pronosticado (1 día antes)',
+                        data: datos.predicho_real.predicho,
+                        borderColor: '#52B788',
+                        backgroundColor: '#52B788',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        borderDash: [6, 3],
+                    },
+                    {
+                        label: 'Venta real',
+                        data: datos.predicho_real.real,
+                        borderColor: '#1B4332',
+                        backgroundColor: '#1B4332',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 3,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: true, position: 'bottom' } },
+                scales: { y: { beginAtZero: true, title: { display: true, text: etiquetaEjeY } } },
+            },
+        });
+
+        const sinDatos = !datos.precision.labels.length && !datos.predicho_real.labels.length;
+        document.getElementById('nota-aprendizaje').textContent = sinDatos
+            ? 'Aún no hay suficiente historial de corridas diarias para mostrar esta tendencia - se irá llenando con cada día que pase.'
+            : '';
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const parametros = new URLSearchParams(window.location.search);
+        const productoSolicitado = parametros.get('producto');
+
+        if (productoSolicitado && infoProductos[productoSolicitado]) {
+            seleccionarProducto(productoSolicitado);
+        } else {
+            mostrarDepartamento();
+        }
+    });
+</script>
+{% endblock %}

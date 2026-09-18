@@ -893,9 +893,26 @@ def listar_predicciones(request):
         "info_dias_json": json.dumps(info_dias),
         "mensajes_contexto": mensajes_contexto,
         "dias_lluvia_json": json.dumps(dias_lluvia),
-        # Petición del asesor de tesis (ver calcular_tendencia_aprendizaje):
-        # tendencia de MAPE y predicho-vs-real en el tiempo, por producto
-        # y para el departamento completo.
+    })
+
+
+# Petición del asesor de tesis (2026-09-18): la tendencia de aprendizaje
+# vivía dentro de Predicciones, pero Francisco decidió (2026-09-18) que es
+# información de otro nivel - le interesa a Gerencia/Administración para
+# sustentar la tesis, no al Comprador en su uso diario - así que se movió
+# a un módulo aparte, restringido a esos dos roles.
+@rol_requerido("ADMINISTRADOR", "GERENTE")
+def tendencia_aprendizaje_modelo(request):
+    hoy = timezone.localdate()
+    productos = Producto.objects.filter(activo=True).order_by("nombre")
+    info_productos = {
+        str(p.id_producto): {
+            "nombre": p.nombre, "upc": p.codigo_upc, "unidad_medida": p.unidad_medida,
+        }
+        for p in productos
+    }
+    return render(request, "tendencia_aprendizaje.html", {
+        "info_productos_json": json.dumps(info_productos),
         "tendencia_aprendizaje_json": json.dumps(calcular_tendencia_aprendizaje(hoy)),
     })
 

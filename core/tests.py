@@ -112,6 +112,10 @@ class ControlDeAccesoPorRolTests(TestCase):
     SOLO_COMPRADOR = ["registrar_merma", "listar_recomendaciones", "generar_orden_compra"]
     COMPRADOR_Y_GERENTE = ["listar_alertas", "listar_mermas", "historial_decisiones", "riesgo_descomposicion"]
     SOLO_ADMINISTRADOR = ["listar_usuarios", "crear_usuario", "listar_configuracion", "mantenimiento"]
+    # Módulo aparte de Predicciones (decisión de Francisco, 2026-09-18): la
+    # tendencia de aprendizaje del modelo es para sustentar la tesis ante
+    # Gerencia/Administración, no para el uso operativo diario del Comprador.
+    GERENTE_Y_ADMINISTRADOR = ["tendencia_aprendizaje_modelo"]
     TODOS_LOS_ROLES = ["dashboard", "listar_predicciones", "buscar_global"]
 
     def setUp(self):
@@ -132,12 +136,12 @@ class ControlDeAccesoPorRolTests(TestCase):
                 self.assertEqual(self._codigo(self.comprador, url_name), 200)
 
     def test_comprador_no_entra_a_modulos_de_administrador(self):
-        for url_name in self.SOLO_ADMINISTRADOR:
+        for url_name in self.SOLO_ADMINISTRADOR + self.GERENTE_Y_ADMINISTRADOR:
             with self.subTest(url_name=url_name):
                 self.assertEqual(self._codigo(self.comprador, url_name), 403)
 
     def test_gerente_entra_solo_a_su_subconjunto(self):
-        for url_name in self.COMPRADOR_Y_GERENTE + self.TODOS_LOS_ROLES:
+        for url_name in self.COMPRADOR_Y_GERENTE + self.GERENTE_Y_ADMINISTRADOR + self.TODOS_LOS_ROLES:
             with self.subTest(url_name=url_name):
                 self.assertEqual(self._codigo(self.gerente, url_name), 200)
 
@@ -147,7 +151,7 @@ class ControlDeAccesoPorRolTests(TestCase):
                 self.assertEqual(self._codigo(self.gerente, url_name), 403)
 
     def test_administrador_entra_solo_a_sus_modulos_de_gestion(self):
-        for url_name in self.SOLO_ADMINISTRADOR + self.TODOS_LOS_ROLES:
+        for url_name in self.SOLO_ADMINISTRADOR + self.GERENTE_Y_ADMINISTRADOR + self.TODOS_LOS_ROLES:
             with self.subTest(url_name=url_name):
                 self.assertEqual(self._codigo(self.administrador, url_name), 200)
 
@@ -159,7 +163,7 @@ class ControlDeAccesoPorRolTests(TestCase):
     def test_superadmin_entra_a_absolutamente_todo(self):
         todas = (
             self.SOLO_COMPRADOR + self.COMPRADOR_Y_GERENTE
-            + self.SOLO_ADMINISTRADOR + self.TODOS_LOS_ROLES
+            + self.SOLO_ADMINISTRADOR + self.GERENTE_Y_ADMINISTRADOR + self.TODOS_LOS_ROLES
         )
         for url_name in todas:
             with self.subTest(url_name=url_name):
@@ -1089,7 +1093,7 @@ class PrediccionesDepartamentoTests(TestCase):
 
     def test_pantalla_muestra_el_titulo_de_departamento_por_defecto(self):
         respuesta = self.client.get(reverse("listar_predicciones"))
-        self.assertContains(respuesta, "Tendencia de predicción del Departamento completo")
+        self.assertContains(respuesta, "Tendencia de predicción del Departamento Alimentos Frescos")
 
 
 class TendenciaAprendizajeModeloTests(TestCase):
@@ -1191,6 +1195,61 @@ class TendenciaAprendizajeModeloTests(TestCase):
             resultado[pid]["predicho_real"], {"labels": [], "predicho": [], "real": []}
         )
         self.assertIn("departamento", resultado)
+
+
+class TendenciaAprendizajeVistaTests(TestCase):
+    """Módulo aparte de Predicciones (decisión de Francisco, 2026-09-18):
+    la vista completa de `tendencia_aprendizaje_modelo` - control de
+    acceso (Gerente/Administrador sí, Comprador no) y que la vista de
+    departamento por defecto renderice con los datos correctos. El
+    cálculo en sí ya está cubierto por `TendenciaAprendizajeModeloTests`
+    contra `calcular_tendencia_aprendizaje` directamente."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador.aprendizaje@test.com", Usuario.Rol.COMPRADOR)
+        self.gerente = crear_usuario("gerente.aprendizaje@test.com", Usuario.Rol.GERENTE)
+        self.administrador = crear_usuario("admin.aprendizaje@test.com", Usuario.Rol.ADMINISTRADOR)
+        self.producto = crear_producto(precio_venta=8.0)
+
+    def test_comprador_no_tiene_acceso(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("tendencia_aprendizaje_modelo"))
+        self.assertEqual(respuesta.status_code, 403)
+
+    def test_gerente_tiene_acceso(self):
+        self.client.force_login(self.gerente)
+        respuesta = self.client.get(reverse("tendencia_aprendizaje_modelo"))
+        self.assertEqual(respuesta.status_code, 200)
+
+    def test_administrador_tiene_acceso(self):
+        self.client.force_login(self.administrador)
+        respuesta = self.client.get(reverse("tendencia_aprendizaje_modelo"))
+        self.assertEqual(respuesta.status_code, 200)
+
+    def test_muestra_departamento_por_defecto(self):
+        self.client.force_login(self.gerente)
+        respuesta = self.client.get(reverse("tendencia_aprendizaje_modelo"))
+        self.assertContains(respuesta, "Departamento Alimentos Frescos")
+
+    def test_incluye_al_producto_activo_en_info_productos(self):
+        self.client.force_login(self.gerente)
+        respuesta = self.client.get(reverse("tendencia_aprendizaje_modelo"))
+        info_productos = json.loads(respuesta.context["info_productos_json"])
+        self.assertIn(str(self.producto.id_producto), info_productos)
+
+    def test_incluye_la_tendencia_del_producto(self):
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+            precision_modelo=12.0,
+        )
+        self.client.force_login(self.gerente)
+        respuesta = self.client.get(reverse("tendencia_aprendizaje_modelo"))
+        tendencia = json.loads(respuesta.context["tendencia_aprendizaje_json"])
+        pid = str(self.producto.id_producto)
+        self.assertIn(pid, tendencia)
+        self.assertIn("departamento", tendencia)
 
 
 class CalcularRiesgoLoteTests(TestCase):
