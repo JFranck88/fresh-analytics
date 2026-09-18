@@ -51,7 +51,7 @@
                         <td>{{ l.producto }}</td>
                         <td>{{ l.categoria }}</td>
                         <td>{{ l.lote|default:"—" }}</td>
-                        <td>{{ l.cantidad|floatformat:0 }}</td>
+                        <td>{% if l.unidad_medida == "PESO" %}{{ l.cantidad|floatformat:2 }} kg{% else %}{{ l.cantidad|floatformat:0 }} u.{% endif %}</td>
                         <td>{{ l.dias_en_exhibicion }}</td>
                         <td>{{ l.porcentaje_vida_util }}%</td>
                         <td><span class="badge bg-{{ l.badge }}">{{ l.nivel }}</span></td>

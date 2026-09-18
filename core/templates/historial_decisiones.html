@@ -67,9 +67,15 @@
                     <td class="text-muted small">{{ f.producto_upc|default:"—" }}</td>
                     <td>{{ f.producto }}</td>
                     {% if es_gerente %}<td>{{ f.usuario }}</td>{% endif %}
-                    <td>{{ f.sugerido }}</td>
-                    <td>{{ f.ajustado }}</td>
-                    <td>{{ f.diferencia }}</td>
+                    {% if f.unidad_medida == "PESO" %}
+                    <td>{{ f.sugerido|floatformat:2 }} kg</td>
+                    <td>{{ f.ajustado|floatformat:2 }} kg</td>
+                    <td>{{ f.diferencia|floatformat:2 }} kg</td>
+                    {% else %}
+                    <td>{{ f.sugerido|floatformat:0 }} u.</td>
+                    <td>{{ f.ajustado|floatformat:0 }} u.</td>
+                    <td>{{ f.diferencia|floatformat:0 }} u.</td>
+                    {% endif %}
                     <td>{% if f.mape is not None %}{{ f.mape }}%{% else %}—{% endif %}</td>
                 </tr>
                 {% empty %}

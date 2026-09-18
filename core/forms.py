@@ -2,7 +2,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.password_validation import validate_password
 from django import forms
 
-from .models import Merma, Usuario, Configuracion
+from .models import Merma, Usuario, Configuracion, Producto
 
 
 class LoginForm(AuthenticationForm):
@@ -27,7 +27,11 @@ class MermaForm(forms.ModelForm):
             # id del producto elegido.
             "producto": forms.HiddenInput(),
             "fecha": forms.DateInput(attrs={"class": "form-control", "type": "date"}),
-            "cantidad": forms.NumberInput(attrs={"class": "form-control", "step": "0.1"}),
+            # step queda en 0.01 por defecto (el más permisivo de los dos
+            # casos); registrar_merma.html lo ajusta a 1 en JS en cuanto
+            # se elige un producto por unidad, pero la regla real que no
+            # se puede saltar vive en clean_cantidad() de abajo.
+            "cantidad": forms.NumberInput(attrs={"class": "form-control", "step": "0.01"}),
             "motivo": forms.Select(attrs={"class": "form-select"}),
         }
     def __init__(self, *args, **kwargs):
@@ -35,6 +39,26 @@ class MermaForm(forms.ModelForm):
         self.fields["motivo"].choices = [("", "Selecciona un motivo")] + list(
             Merma.Motivo.choices
         )
+
+    def clean_cantidad(self):
+        """Reportado por Francisco (2026-09-17/18): una merma de "0.9
+        quesos" no tiene lógica para un producto que se cuenta por pieza -
+        sí la tiene para uno de peso variable (se pesa suelto en la caja).
+        El paso 0.01 del campo permite escribir cualquier decimal, así que
+        la regla real se exige aquí, del lado del servidor - no basta con
+        el ajuste de step que hace el JS de registrar_merma.html, que un
+        usuario podría saltarse escribiendo el número a mano."""
+        cantidad = self.cleaned_data.get("cantidad")
+        producto = self.cleaned_data.get("producto")
+        if cantidad is None or not producto:
+            return cantidad
+
+        if producto.unidad_medida != Producto.UnidadMedida.PESO and cantidad != int(cantidad):
+            raise forms.ValidationError(
+                "Este producto se maneja por unidad - la cantidad debe ser "
+                "un número entero (no aplica peso variable)."
+            )
+        return cantidad
 
 from .models import Usuario
 

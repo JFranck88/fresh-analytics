@@ -4,7 +4,8 @@ from .models import Producto, Venta, Inventario, Merma, Prediccion, Alerta, Conf
 
 @admin.register(Producto)
 class ProductoAdmin(admin.ModelAdmin):
-    list_display = ("codigo_upc", "nombre", "categoria", "vida_util_dias", "precio_venta", "activo")
+    list_display = ("codigo_upc", "nombre", "categoria", "unidad_medida", "vida_util_dias", "precio_venta", "activo")
+    list_filter = ("categoria", "unidad_medida", "activo")
     search_fields = ("codigo_upc", "nombre")
 
 

@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from .models import (
     Producto, Inventario, Merma, Prediccion, Usuario,
-    Alerta, Configuracion, DecisionHistorial,
+    Alerta, Configuracion, DecisionHistorial, Venta,
 )
 from .riesgo_descomposicion import calcular_riesgo_lote, primer_dia_que_sube_de_nivel
 
@@ -1275,3 +1275,311 @@ class BuscarTopbarModuloActualTests(TestCase):
     def test_listar_mermas_reporta_su_propio_modulo(self):
         respuesta = self.client.get(reverse("listar_mermas"))
         self.assertContains(respuesta, "var moduloActual = 'listar_mermas';")
+
+
+class ProductoUnidadMedidaTests(TestCase):
+    """Nuevo campo Producto.unidad_medida (reportado por Francisco,
+    2026-09-17/18): una merma de "0.9 quesos" no tiene lógica para un
+    producto que se cuenta por pieza, pero sí la tiene para uno de peso
+    variable (se pesa suelto en la caja) - mismo concepto que la
+    industria retail llama "peso variable" o "catch weight", y que GS1
+    codifica distinto en el código de barras (prefijo 2, con el peso
+    incluido en el propio código)."""
+
+    def test_por_defecto_es_unidad(self):
+        producto = crear_producto()
+        self.assertEqual(producto.unidad_medida, Producto.UnidadMedida.UNIDAD)
+
+    def test_redondear_cantidad_da_entero_para_unidad(self):
+        producto = crear_producto(unidad_medida=Producto.UnidadMedida.UNIDAD)
+        resultado = producto.redondear_cantidad(4.6)
+        self.assertEqual(resultado, 5)
+        self.assertEqual(resultado, int(resultado))
+
+    def test_redondear_cantidad_conserva_decimales_para_peso(self):
+        producto = crear_producto(unidad_medida=Producto.UnidadMedida.PESO)
+        self.assertEqual(producto.redondear_cantidad(4.567), 4.57)
+
+
+class RegistrarMermaUnidadMedidaTests(TestCase):
+    """La cantidad de una merma debe respetar Producto.unidad_medida: un
+    producto por unidad no admite decimales; uno de peso variable sí,
+    porque se pesa suelto en la caja (reportado por Francisco al ver
+    "0.9" en la cantidad de un queso, 2026-09-17/18)."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador.peso@test.com", Usuario.Rol.COMPRADOR)
+        self.queso = crear_producto(nombre="Queso fresco", upc="7501112223301", unidad_medida=Producto.UnidadMedida.UNIDAD)
+        self.pechuga = crear_producto(nombre="Pechuga de pollo", upc="7501112223302", unidad_medida=Producto.UnidadMedida.PESO)
+        self.client.force_login(self.comprador)
+
+    def _post(self, producto, cantidad):
+        return self.client.post(reverse("registrar_merma"), {
+            "producto": producto.id_producto,
+            "fecha": timezone.localdate().isoformat(),
+            "cantidad": cantidad,
+            "motivo": Merma.Motivo.VENCIMIENTO,
+        })
+
+    def test_decimal_en_producto_por_unidad_falla_la_validacion(self):
+        respuesta = self._post(self.queso, "0.9")
+        self.assertEqual(respuesta.status_code, 200)  # re-muestra el formulario con error
+        self.assertEqual(Merma.objects.count(), 0)
+        self.assertContains(respuesta, "número entero")
+
+    def test_entero_en_producto_por_unidad_se_registra(self):
+        respuesta = self._post(self.queso, "2")
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertEqual(Merma.objects.get().cantidad, 2)
+
+    def test_decimal_en_producto_de_peso_variable_se_registra(self):
+        respuesta = self._post(self.pechuga, "0.9")
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertEqual(Merma.objects.get().cantidad, 0.9)
+
+
+class BuscarProductosJsonUnidadMedidaTests(TestCase):
+    """registrar_merma.html usa este endpoint para saber, apenas se elige
+    un producto, si debe permitir decimales en el campo Cantidad."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador.json.peso@test.com", Usuario.Rol.COMPRADOR)
+        self.pechuga = crear_producto(nombre="Pechuga de pollo", upc="7501112223303", unidad_medida=Producto.UnidadMedida.PESO)
+        self.client.force_login(self.comprador)
+
+    def test_incluye_unidad_medida_en_la_respuesta(self):
+        respuesta = self.client.get(reverse("buscar_productos_json"), {"q": "pechuga"})
+        datos = respuesta.json()
+        self.assertEqual(datos[0]["unidad_medida"], "PESO")
+
+
+class RecomendacionesUnidadMedidaTests(TestCase):
+    """El criterio de peso variable también aplica a la cantidad sugerida
+    de reabastecimiento: para un producto que se pesa (kg), el sugerido y
+    el ajuste pueden tener decimales; para uno por pieza, deben ser
+    siempre un entero (reportado por Francisco, 2026-09-17/18)."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador.recom.peso@test.com", Usuario.Rol.COMPRADOR)
+        self.pechuga = crear_producto(nombre="Pechuga de pollo", upc="7501112223304", unidad_medida=Producto.UnidadMedida.PESO)
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.pechuga, fecha_prediccion=hoy,
+            fecha_pronosticada=hoy, valor_predicho=20.7, intervalo_inferior=15,
+            intervalo_superior=25, precision_modelo=10.0,
+        )
+        Inventario.objects.create(
+            producto=self.pechuga, fecha_ingreso=hoy,
+            fecha_vencimiento=hoy + timedelta(days=5), cantidad=5.2,
+        )
+        self.client.force_login(self.comprador)
+
+    def test_sugerido_conserva_decimales_para_peso_variable(self):
+        respuesta = self.client.get(reverse("listar_recomendaciones"))
+        fila = respuesta.context["recomendaciones"][0]
+        self.assertEqual(fila["sugerido"], 15.5)  # 20.7 predicho - 5.2 en stock
+
+    def test_ajuste_decimal_se_guarda_para_peso_variable(self):
+        self.client.post(reverse("listar_recomendaciones"), {
+            f"ajuste_{self.pechuga.id_producto}": "18.25",
+        })
+        historial = DecisionHistorial.objects.get()
+        self.assertEqual(historial.cantidad_ajustada, 18.25)
+
+    def test_ajuste_decimal_se_rechaza_para_producto_por_unidad(self):
+        queso = crear_producto(nombre="Queso fresco", upc="7501112223305", unidad_medida=Producto.UnidadMedida.UNIDAD)
+        Prediccion.objects.create(
+            producto=queso, fecha_prediccion=timezone.localdate(),
+            fecha_pronosticada=timezone.localdate(), valor_predicho=10, intervalo_inferior=8,
+            intervalo_superior=12,
+        )
+        self.client.post(reverse("listar_recomendaciones"), {
+            f"ajuste_{queso.id_producto}": "7.5",
+        })
+        self.assertEqual(DecisionHistorial.objects.count(), 0)
+
+
+class HistorialDecisionesUnidadMedidaTests(TestCase):
+    """La tabla de Historial de decisiones debe mostrar kg para productos
+    de peso variable y unidades para el resto - mismo criterio que en
+    toda la pantalla de Recomendaciones."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador.hist.peso@test.com", Usuario.Rol.COMPRADOR)
+        self.pechuga = crear_producto(nombre="Pechuga de pollo", upc="7501112223306", unidad_medida=Producto.UnidadMedida.PESO)
+        DecisionHistorial.objects.create(
+            producto=self.pechuga, usuario=self.comprador,
+            fecha_prediccion=timezone.localdate(),
+            cantidad_sugerida=15.5, cantidad_ajustada=18.25,
+        )
+        self.client.force_login(self.comprador)
+
+    def test_muestra_kg_para_producto_de_peso_variable(self):
+        respuesta = self.client.get(reverse("historial_decisiones"))
+        # El formato local (es-GT) usa coma decimal - igual que el resto
+        # del sistema (ej. "Q 18,00" en Mermas).
+        self.assertContains(respuesta, "18,25 kg")
+
+
+class RiesgoDescomposicionUnidadMedidaTests(TestCase):
+    """La columna Cantidad de Riesgo climático debe mostrar kg para
+    productos de peso variable y unidades para el resto - mismo criterio
+    en todo el sistema (reportado por Francisco, 2026-09-17/18)."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("gerente.riesgo.peso@test.com", Usuario.Rol.GERENTE)
+        self.manzana = crear_producto(
+            nombre="Manzana roja", upc="7501112223307", categoria=Producto.Categoria.FRUTAS,
+            unidad_medida=Producto.UnidadMedida.PESO, vida_util_dias=15,
+        )
+        self.aguacate = crear_producto(
+            nombre="Aguacate hass", upc="7501112223308", categoria=Producto.Categoria.FRUTAS,
+            unidad_medida=Producto.UnidadMedida.UNIDAD, vida_util_dias=5,
+        )
+        hoy = timezone.localdate()
+        Inventario.objects.create(
+            producto=self.manzana, fecha_ingreso=hoy,
+            fecha_vencimiento=hoy + timedelta(days=10), cantidad=8.4,
+        )
+        Inventario.objects.create(
+            producto=self.aguacate, fecha_ingreso=hoy,
+            fecha_vencimiento=hoy + timedelta(days=4), cantidad=12,
+        )
+        self.client.force_login(self.gerente)
+
+    def test_producto_de_peso_variable_muestra_kg(self):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        self.assertContains(respuesta, "8,40 kg")  # coma decimal (es-GT)
+
+    def test_producto_por_unidad_muestra_u(self):
+        respuesta = self.client.get(reverse("riesgo_descomposicion"))
+        self.assertContains(respuesta, "12 u.")
+
+
+class ListarMermasUnidadMedidaTests(TestCase):
+    """Mismo criterio que Riesgo climático, aplicado a la tabla de
+    Historial de mermas."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("gerente.mermas.peso@test.com", Usuario.Rol.GERENTE)
+        self.pechuga = crear_producto(nombre="Pechuga de pollo", upc="7501112223309", unidad_medida=Producto.UnidadMedida.PESO)
+        self.queso = crear_producto(nombre="Queso fresco", upc="7501112223310", unidad_medida=Producto.UnidadMedida.UNIDAD)
+        Merma.objects.create(
+            producto=self.pechuga, fecha=timezone.localdate(), cantidad=0.9,
+            motivo=Merma.Motivo.DANO, costo_perdida=18.0,
+        )
+        Merma.objects.create(
+            producto=self.queso, fecha=timezone.localdate(), cantidad=2,
+            motivo=Merma.Motivo.VENCIMIENTO, costo_perdida=36.0,
+        )
+        self.client.force_login(self.gerente)
+
+    def test_peso_variable_muestra_kg(self):
+        respuesta = self.client.get(reverse("listar_mermas"))
+        self.assertContains(respuesta, "0,90 kg")  # coma decimal (es-GT)
+
+    def test_por_unidad_muestra_u(self):
+        respuesta = self.client.get(reverse("listar_mermas"))
+        self.assertContains(respuesta, "2 u.")
+
+
+class GenerarDatosPruebaUnidadMedidaTests(TestCase):
+    """El catálogo de siembra clasifica los productos por unidad de
+    medida (confirmado con Francisco, 2026-09-18): Pechuga de pollo,
+    Carne molida de res, Tomate de riñón, Cebolla blanca, Manzana roja y
+    Banano son de peso variable; el resto es por unidad. "Pan de molde"
+    ya no existe en el catálogo - se reemplazó por "Pan dulce" (Francisco:
+    pan de molde no es un producto típico en Guatemala)."""
+
+    PESO_VARIABLE = [
+        "Pechuga de pollo", "Carne molida de res", "Tomate de riñón",
+        "Cebolla blanca", "Manzana roja", "Banano",
+    ]
+    POR_UNIDAD = [
+        "Leche entera 1L", "Queso fresco", "Yogurt natural", "Chorizo",
+        "Lechuga", "Aguacate hass", "Pan francés", "Pan dulce",
+    ]
+
+    def setUp(self):
+        salida = StringIO()
+        call_command("generar_datos_prueba", "--dias", "15", stdout=salida)
+
+    def test_clasifica_productos_de_peso_variable(self):
+        for nombre in self.PESO_VARIABLE:
+            producto = Producto.objects.get(nombre=nombre)
+            self.assertEqual(producto.unidad_medida, Producto.UnidadMedida.PESO, nombre)
+
+    def test_clasifica_productos_por_unidad(self):
+        for nombre in self.POR_UNIDAD:
+            producto = Producto.objects.get(nombre=nombre)
+            self.assertEqual(producto.unidad_medida, Producto.UnidadMedida.UNIDAD, nombre)
+
+    def test_pan_de_molde_ya_no_existe_en_el_catalogo(self):
+        self.assertFalse(Producto.objects.filter(nombre="Pan de molde").exists())
+
+    def test_producto_de_peso_variable_genera_ventas_con_decimales(self):
+        pechuga = Producto.objects.get(nombre="Pechuga de pollo")
+        cantidades = list(Venta.objects.filter(producto=pechuga).values_list("cantidad", flat=True))
+        self.assertTrue(cantidades)
+        self.assertTrue(any(c != int(c) for c in cantidades))
+
+    def test_producto_por_unidad_siempre_genera_ventas_enteras(self):
+        queso = Producto.objects.get(nombre="Queso fresco")
+        cantidades = list(Venta.objects.filter(producto=queso).values_list("cantidad", flat=True))
+        self.assertTrue(cantidades)
+        self.assertTrue(all(c == int(c) for c in cantidades))
+
+    def test_merma_minima_es_0_05_kg_para_peso_variable(self):
+        pechuga = Producto.objects.get(nombre="Pechuga de pollo")
+        mermas = Merma.objects.filter(producto=pechuga)
+        if mermas.exists():
+            self.assertTrue(all(m.cantidad >= 0.05 for m in mermas))
+
+    def test_merma_minima_es_1_unidad_para_producto_por_unidad(self):
+        queso = Producto.objects.get(nombre="Queso fresco")
+        mermas = Merma.objects.filter(producto=queso)
+        if mermas.exists():
+            self.assertTrue(all(m.cantidad >= 1 and m.cantidad == int(m.cantidad) for m in mermas))
+
+
+class ActualizarHistorialVentasUnidadMedidaTests(TestCase):
+    """Mismo criterio de unidad de medida que generar_datos_prueba.py,
+    pero en el job nocturno que mantiene vivo el historial (RNF-04) - debe
+    seguir siendo consistente día a día (reportado por Francisco,
+    2026-09-17/18)."""
+
+    def setUp(self):
+        self.pechuga = crear_producto(
+            nombre="Pechuga de pollo", upc="7501112223311",
+            categoria=Producto.Categoria.CARNES, unidad_medida=Producto.UnidadMedida.PESO,
+        )
+        self.queso = crear_producto(
+            nombre="Queso fresco", upc="7501112223312",
+            categoria=Producto.Categoria.LACTEOS, unidad_medida=Producto.UnidadMedida.UNIDAD,
+        )
+        # Sin ninguna Venta previa, el comando solo genera el día de ayer -
+        # insuficiente para una muestra representativa. Se siembra una
+        # venta vieja para forzar varios días de backfill (el comando mira
+        # la fecha de la ÚLTIMA venta de TODO el catálogo, no por producto).
+        self.venta_semilla = Venta.objects.create(
+            producto=self.queso, fecha=timezone.now() - timedelta(days=15),
+            cantidad=1, precio_unitario=self.queso.precio_venta,
+        )
+        salida = StringIO()
+        call_command("actualizar_historial_ventas", stdout=salida)
+
+    def test_producto_de_peso_variable_genera_ventas_con_decimales(self):
+        cantidades = list(Venta.objects.filter(producto=self.pechuga).values_list("cantidad", flat=True))
+        self.assertTrue(cantidades)
+        self.assertTrue(any(c != int(c) for c in cantidades))
+
+    def test_producto_por_unidad_siempre_genera_ventas_enteras(self):
+        # Se excluye la venta sembrada en setUp (ya entera de por sí) para
+        # verificar específicamente lo que generó el comando.
+        cantidades = list(
+            Venta.objects.filter(producto=self.queso)
+            .exclude(pk=self.venta_semilla.pk)
+            .values_list("cantidad", flat=True)
+        )
+        self.assertTrue(cantidades)
+        self.assertTrue(all(c == int(c) for c in cantidades))

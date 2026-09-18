@@ -136,6 +136,16 @@
         detalleDiaPrediccion.classList.remove('d-none');
     }
 
+    // Peso variable se pronostica en kg (con decimal); por unidad, en
+    // piezas enteras - mismo criterio que la tabla de abajo y que el
+    // resto del sistema (ver Producto.unidad_medida).
+    function etiquetaEjeY(pid) {
+        const info = infoProductos[pid] || {};
+        return info.unidad_medida === 'PESO'
+            ? 'Kg de venta esperados'
+            : 'Unidades de venta esperadas';
+    }
+
     let chartTendencia;
     function dibujar(pid) {
         const datos = datosGrafica[pid];
@@ -182,7 +192,7 @@
                 scales: {
                     y: {
                         beginAtZero: true,
-                        title: { display: true, text: 'Unidades de venta esperadas' },
+                        title: { display: true, text: etiquetaEjeY(pid) },
                     }
                 },
                 onClick: function (evt, elementos) {
@@ -226,7 +236,7 @@
             <thead><tr><th>UPC</th><th>Producto</th><th>Fecha</th><th>Venta Estimada</th><th>Rango esperado</th><th>Margen de error</th></tr></thead>
             <tbody>
                 {% for p in predicciones %}
-                <tr data-producto="{{ p.producto.id_producto }}"><td class="text-muted small">{{ p.producto.codigo_upc|default:"—" }}</td><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td><td><strong>{{ p.valor_predicho|floatformat:0 }}</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }}</td><td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
+                <tr data-producto="{{ p.producto.id_producto }}"><td class="text-muted small">{{ p.producto.codigo_upc|default:"—" }}</td><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td>{% if p.producto.unidad_medida == "PESO" %}<td><strong>{{ p.valor_predicho|floatformat:2 }} kg</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:2 }} - {{ p.intervalo_superior|floatformat:2 }} kg</td>{% else %}<td><strong>{{ p.valor_predicho|floatformat:0 }} u.</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }} u.</td>{% endif %}<td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
                 {% empty %}
                 <tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-graph-up me-2"></i>Todavía no hay predicciones generadas.</td></tr>
                 {% endfor %}

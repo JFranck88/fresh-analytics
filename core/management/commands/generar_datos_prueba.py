@@ -7,21 +7,29 @@ from django.utils import timezone
 from core.models import Producto, Venta, Inventario, Merma
 from core.clima import lluvia_sintetica
 
+
+# El 7mo campo de cada tupla es Producto.UnidadMedida: "UNIDAD" (se cuenta
+# por pieza - siempre cantidades enteras) o "PESO" (peso variable, se pesa
+# suelto en caja - cantidades en kg, con decimales). Clasificación
+# confirmada con Francisco (2026-09-18): los 6 marcados como PESO son los
+# que en un súper real se pesan en la caja; el resto vienen empacados o se
+# cuentan por pieza. "Pan de molde" se reemplazó por "Pan dulce" - no es un
+# producto típico en Guatemala.
 CATALOGO = [
-    ("Leche entera 1L", "LACTEOS", 10, "Lacteos San Miguel", 6.00, 9.00),
-    ("Queso fresco", "LACTEOS", 10, "Lacteos San Miguel", 18.00, 25.00),
-    ("Yogurt natural", "LACTEOS", 14, "Lacteos San Miguel", 5.00, 8.00),
-    ("Pechuga de pollo", "CARNES", 4, "Avicola Petapa", 20.00, 32.00),
-    ("Carne molida de res", "CARNES", 3, "Carnicos del Valle", 28.00, 42.00),
-    ("Chorizo", "CARNES", 7, "Carnicos del Valle", 15.00, 24.00),
-    ("Tomate de riñón", "VERDURAS", 5, "Agroexport GT", 5.00, 8.50),
-    ("Cebolla blanca", "VERDURAS", 12, "Agroexport GT", 3.50, 6.00),
-    ("Lechuga", "VERDURAS", 6, "Agroexport GT", 3.00, 5.50),
-    ("Manzana roja", "FRUTAS", 15, "Frutas del Altiplano", 4.00, 6.00),
-    ("Banano", "FRUTAS", 6, "Frutas del Altiplano", 2.50, 4.00),
-    ("Aguacate hass", "FRUTAS", 5, "Frutas del Altiplano", 6.00, 9.50),
-    ("Pan francés", "PANADERIA", 2, "Panificadora Ideal", 1.50, 2.50),
-    ("Pan de molde", "PANADERIA", 7, "Panificadora Ideal", 12.00, 18.00),
+    ("Leche entera 1L", "LACTEOS", 10, "Lacteos San Miguel", 6.00, 9.00, "UNIDAD"),
+    ("Queso fresco", "LACTEOS", 10, "Lacteos San Miguel", 18.00, 25.00, "UNIDAD"),
+    ("Yogurt natural", "LACTEOS", 14, "Lacteos San Miguel", 5.00, 8.00, "UNIDAD"),
+    ("Pechuga de pollo", "CARNES", 4, "Avicola Petapa", 20.00, 32.00, "PESO"),
+    ("Carne molida de res", "CARNES", 3, "Carnicos del Valle", 28.00, 42.00, "PESO"),
+    ("Chorizo", "CARNES", 7, "Carnicos del Valle", 15.00, 24.00, "UNIDAD"),
+    ("Tomate de riñón", "VERDURAS", 5, "Agroexport GT", 5.00, 8.50, "PESO"),
+    ("Cebolla blanca", "VERDURAS", 12, "Agroexport GT", 3.50, 6.00, "PESO"),
+    ("Lechuga", "VERDURAS", 6, "Agroexport GT", 3.00, 5.50, "UNIDAD"),
+    ("Manzana roja", "FRUTAS", 15, "Frutas del Altiplano", 4.00, 6.00, "PESO"),
+    ("Banano", "FRUTAS", 6, "Frutas del Altiplano", 2.50, 4.00, "PESO"),
+    ("Aguacate hass", "FRUTAS", 5, "Frutas del Altiplano", 6.00, 9.50, "UNIDAD"),
+    ("Pan francés", "PANADERIA", 2, "Panificadora Ideal", 1.50, 2.50, "UNIDAD"),
+    ("Pan dulce", "PANADERIA", 3, "Panificadora Ideal", 1.00, 1.75, "UNIDAD"),
 ]
 
 FACTOR_SEMANA = {0: 0.9, 1: 0.8, 2: 0.8, 3: 0.95, 4: 1.3, 5: 1.4, 6: 1.1}
@@ -33,6 +41,11 @@ BASE_DEMANDA = {
     "VERDURAS": 35,
     "PANADERIA": 40,
 }
+
+# La precisión de cada cantidad (venta, merma, lote) según sea peso
+# variable o por unidad vive en Producto.redondear_cantidad() - un único
+# lugar, usado tanto aquí como en actualizar_historial_ventas.py, para que
+# ambos generadores queden siempre consistentes entre sí.
 
 
 class Command(BaseCommand):
@@ -52,12 +65,12 @@ class Command(BaseCommand):
             self.stdout.write("Ventas, mermas e inventario anteriores eliminados.")
 
         productos = []
-        for nombre, categoria, vida_util, proveedor, p_compra, p_venta in CATALOGO:
+        for nombre, categoria, vida_util, proveedor, p_compra, p_venta, unidad_medida in CATALOGO:
             producto, _ = Producto.objects.get_or_create(
                 nombre=nombre,
                 defaults=dict(
                     categoria=categoria, vida_util_dias=vida_util, proveedor=proveedor,
-                    precio_compra=p_compra, precio_venta=p_venta,
+                    precio_compra=p_compra, precio_venta=p_venta, unidad_medida=unidad_medida,
                 ),
             )
             productos.append(producto)
@@ -78,13 +91,15 @@ class Command(BaseCommand):
 
             for producto in productos:
                 base = BASE_DEMANDA.get(producto.categoria, 20)
-                cantidad_dia = max(0, round(random.gauss(base * factor_total, base * 0.15)))
+                cantidad_dia = max(0, producto.redondear_cantidad(
+                    random.gauss(base * factor_total, base * 0.15)
+                ))
 
                 # Efecto del clima (RF-08): días de lluvia reducen la venta
                 # de productos frescos, coherente con menos flujo de
                 # clientes comprando perecederos delicados ese día.
                 if llueve_hoy and producto.categoria in ("FRUTAS", "VERDURAS"):
-                    cantidad_dia = max(0, round(cantidad_dia * 0.88))
+                    cantidad_dia = max(0, producto.redondear_cantidad(cantidad_dia * 0.88))
 
                 if cantidad_dia <= 0:
                     continue
@@ -99,18 +114,23 @@ class Command(BaseCommand):
                 ))
 
                 if random.random() < 0.35:
-                    # Cantidad de la merma: igual que Venta.cantidad e
-                    # Inventario.cantidad (ver más abajo), siempre un
-                    # número ENTERO de unidades - perder "0,5 yogures" o
-                    # "0,7 panes" no tiene sentido para productos que se
-                    # cuentan por pieza (reportado por Francisco al ver
-                    # decimales en Historial de Mermas). Antes se
-                    # redondeaba a 1 decimal, lo que producía justo esos
-                    # valores fraccionarios. Como el dado de arriba ya
-                    # decide SI hay merma ese día, una vez que ocurre se
-                    # garantiza al menos 1 unidad completa (en vez de que
-                    # el redondeo la deje en 0 y se pierda el registro).
-                    cantidad_merma = max(1, round(cantidad_dia * random.uniform(0.005, 0.03)))
+                    # Cantidad de la merma: usa la misma regla de
+                    # redondeo que Venta.cantidad e Inventario.cantidad
+                    # (redondear_cantidad, ver arriba) - entero completo
+                    # para productos por unidad ("0,5 yogures" no tiene
+                    # sentido), decimal en kg para productos de peso
+                    # variable (reportado por Francisco al ver decimales
+                    # en Historial de Mermas para un producto por pieza;
+                    # confirmado que sí tienen sentido para peso variable,
+                    # 2026-09-17/18). Como el dado de arriba ya decide SI
+                    # hay merma ese día, una vez que ocurre se garantiza
+                    # una cantidad mínima perceptible (en vez de que el
+                    # redondeo la deje en 0 y se pierda el registro): 1
+                    # unidad completa, o 0.05 kg para peso variable.
+                    minimo = 0.05 if producto.unidad_medida == "PESO" else 1
+                    cantidad_merma = max(minimo, producto.redondear_cantidad(
+                        cantidad_dia * random.uniform(0.005, 0.03)
+                    ))
                     if producto.categoria in ("FRUTAS", "VERDURAS"):
                         if producto.nombre == "Tomate de riñón":
                             pesos = [0.25, 0.65, 0.10]
@@ -134,7 +154,7 @@ class Command(BaseCommand):
 
             if dia_num % 3 == 0:
                 for producto in productos:
-                    cantidad_lote = round(
+                    cantidad_lote = producto.redondear_cantidad(
                         BASE_DEMANDA.get(producto.categoria, 20) * random.uniform(2.5, 4)
                     )
                     inventarios_bulk.append(Inventario(

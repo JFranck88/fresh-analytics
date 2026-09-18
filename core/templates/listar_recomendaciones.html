@@ -19,10 +19,17 @@
                     <tr>
                         <td class="text-muted small">{{ r.producto_upc|default:"—" }}</td>
                         <td>{{ r.producto }}</td>
-                        <td>{{ r.prediccion_semana }}</td>
-                        <td>{{ r.stock_actual }}</td>
-                        <td><strong>{{ r.sugerido }}</strong></td>
+                        {% if r.unidad_medida == "PESO" %}
+                        <td>{{ r.prediccion_semana|floatformat:2 }} kg</td>
+                        <td>{{ r.stock_actual|floatformat:2 }} kg</td>
+                        <td><strong>{{ r.sugerido|floatformat:2 }} kg</strong></td>
+                        <td><input type="number" step="0.01" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 100px" value="{{ r.sugerido }}"></td>
+                        {% else %}
+                        <td>{{ r.prediccion_semana|floatformat:0 }} u.</td>
+                        <td>{{ r.stock_actual|floatformat:0 }} u.</td>
+                        <td><strong>{{ r.sugerido|floatformat:0 }} u.</strong></td>
                         <td><input type="number" step="1" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 90px" value="{{ r.sugerido }}"></td>
+                        {% endif %}
                     </tr>
                     {% endfor %}
                 </tbody>

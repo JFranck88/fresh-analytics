@@ -90,10 +90,12 @@ class Command(BaseCommand):
 
         for producto in productos:
             base = BASE_DEMANDA.get(producto.categoria, 20)
-            cantidad_dia = max(0, round(random.gauss(base * factor_total, base * 0.15)))
+            cantidad_dia = max(0, producto.redondear_cantidad(
+                random.gauss(base * factor_total, base * 0.15)
+            ))
 
             if llueve_ese_dia and producto.categoria in ("FRUTAS", "VERDURAS"):
-                cantidad_dia = max(0, round(cantidad_dia * 0.88))
+                cantidad_dia = max(0, producto.redondear_cantidad(cantidad_dia * 0.88))
 
             if cantidad_dia > 0:
                 hora = random.randint(8, 20)
@@ -106,19 +108,20 @@ class Command(BaseCommand):
                 ))
 
                 if random.random() < 0.35:
-                    # Cantidad de la merma: igual que Venta.cantidad e
-                    # Inventario.cantidad, siempre un número ENTERO de
-                    # unidades - perder "0,5 yogures" o "0,7 panes" no
-                    # tiene sentido para productos que se cuentan por
-                    # pieza (reportado por Francisco al ver decimales en
-                    # Historial de Mermas). Antes se redondeaba a 1
-                    # decimal, lo que producía justo esos valores
-                    # fraccionarios. Como el dado de arriba ya decide SI
-                    # hay merma ese día, una vez que ocurre se garantiza
-                    # al menos 1 unidad completa (en vez de que el
-                    # redondeo la deje en 0 y se pierda el registro). Ver
-                    # el mismo fix en generar_datos_prueba.py.
-                    cantidad_merma = max(1, round(cantidad_dia * random.uniform(0.005, 0.03)))
+                    # Cantidad de la merma: misma regla de redondeo que
+                    # Venta.cantidad e Inventario.cantidad
+                    # (redondear_cantidad, definida en
+                    # generar_datos_prueba.py) - entero completo para
+                    # productos por unidad, decimal en kg para productos
+                    # de peso variable (ver el mismo criterio y su
+                    # justificación completa ahí). Como el dado de arriba
+                    # ya decide SI hay merma ese día, una vez que ocurre
+                    # se garantiza una cantidad mínima perceptible: 1
+                    # unidad completa, o 0.05 kg para peso variable.
+                    minimo = 0.05 if producto.unidad_medida == "PESO" else 1
+                    cantidad_merma = max(minimo, producto.redondear_cantidad(
+                        cantidad_dia * random.uniform(0.005, 0.03)
+                    ))
                     if producto.categoria in ("FRUTAS", "VERDURAS"):
                         if producto.nombre == "Tomate de riñón":
                             pesos = [0.25, 0.65, 0.10]
@@ -142,7 +145,7 @@ class Command(BaseCommand):
 
             # Reposición de inventario: un lote nuevo cada día, como en una
             # tienda real donde el stock se repone constantemente.
-            cantidad_lote = round(
+            cantidad_lote = producto.redondear_cantidad(
                 BASE_DEMANDA.get(producto.categoria, 20) * random.uniform(2.5, 4)
             )
             inventarios_bulk.append(Inventario(

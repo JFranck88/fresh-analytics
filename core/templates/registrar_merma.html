@@ -6,6 +6,9 @@
         <div class="card-body">
             <form method="post">
                 {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger py-2 small">{{ form.non_field_errors|join:" " }}</div>
+                {% endif %}
                 <div class="mb-3">
                     <label class="form-label">Producto</label>
                     <div class="row g-2 mb-2">
@@ -23,10 +26,23 @@
                         <button type="button" id="btn-cambiar-producto" class="btn btn-link btn-sm p-0 ms-2">Cambiar</button>
                     </div>
                     {{ form.producto }}
+                    {% if form.producto.errors %}<div class="text-danger small mt-1">{{ form.producto.errors|join:" " }}</div>{% endif %}
                 </div>
-                <div class="mb-3"><label class="form-label">Fecha</label>{{ form.fecha }}</div>
-                <div class="mb-3"><label class="form-label">Cantidad</label>{{ form.cantidad }}</div>
-                <div class="mb-3"><label class="form-label">Motivo</label>{{ form.motivo }}</div>
+                <div class="mb-3">
+                    <label class="form-label">Fecha</label>
+                    {{ form.fecha }}
+                    {% if form.fecha.errors %}<div class="text-danger small mt-1">{{ form.fecha.errors|join:" " }}</div>{% endif %}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Cantidad <span id="cantidad-unidad" class="text-muted small"></span></label>
+                    {{ form.cantidad }}
+                    {% if form.cantidad.errors %}<div class="text-danger small mt-1">{{ form.cantidad.errors|join:" " }}</div>{% endif %}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Motivo</label>
+                    {{ form.motivo }}
+                    {% if form.motivo.errors %}<div class="text-danger small mt-1">{{ form.motivo.errors|join:" " }}</div>{% endif %}
+                </div>
                 <button type="submit" class="btn btn-primary w-100"><i class="bi bi-check-circle me-1"></i>Registrar merma</button>
             </form>
         </div>
@@ -42,7 +58,25 @@
     const seleccionadoBox = document.getElementById('producto-seleccionado');
     const seleccionadoTexto = document.getElementById('producto-seleccionado-texto');
     const btnCambiar = document.getElementById('btn-cambiar-producto');
+    const inputCantidad = document.getElementById('id_cantidad');
+    const cantidadUnidad = document.getElementById('cantidad-unidad');
     let temporizador;
+
+    // Ajusta el paso del campo Cantidad y el texto de ayuda según el
+    // producto elegido: peso variable se pesa en kg (admite decimales),
+    // por unidad se cuenta en piezas completas (reportado por Francisco,
+    // 2026-09-17/18 - ver Producto.unidad_medida). Esto es solo una
+    // ayuda visual: la regla que de verdad se exige vive en
+    // MermaForm.clean_cantidad (forms.py), del lado del servidor.
+    function ajustarCampoCantidad(unidadMedida) {
+        if (unidadMedida === 'PESO') {
+            inputCantidad.step = '0.01';
+            cantidadUnidad.textContent = '(en kg, ej. 0.9)';
+        } else {
+            inputCantidad.step = '1';
+            cantidadUnidad.textContent = '(en unidades completas)';
+        }
+    }
 
     function renderResultados(datos) {
         resultados.innerHTML = '';
@@ -79,6 +113,7 @@
         hiddenProducto.value = p.id;
         seleccionadoTexto.textContent = `${p.upc || '—'} — ${p.nombre}`;
         seleccionadoBox.classList.remove('d-none');
+        ajustarCampoCantidad(p.unidad_medida);
         inputUpc.value = '';
         inputDesc.value = '';
         resultados.innerHTML = '';

@@ -391,7 +391,13 @@ def buscar_productos_json(request):
 
     productos = productos.order_by("nombre")[:20]
     data = [
-        {"id": p.id_producto, "upc": p.codigo_upc, "nombre": p.nombre}
+        {
+            "id": p.id_producto, "upc": p.codigo_upc, "nombre": p.nombre,
+            # Usado por registrar_merma.html para ajustar el paso del
+            # campo Cantidad (entero vs. decimal) y mostrar la unidad
+            # correcta apenas se elige el producto.
+            "unidad_medida": p.unidad_medida,
+        }
         for p in productos
     ]
     return JsonResponse(data, safe=False)
@@ -564,6 +570,7 @@ def riesgo_descomposicion(request):
             "producto_upc": lote.producto.codigo_upc,
             "categoria": lote.producto.get_categoria_display(),
             "cantidad": lote.cantidad,
+            "unidad_medida": lote.producto.unidad_medida,
             "fecha_ingreso": lote.fecha_ingreso,
             "dias_en_exhibicion": dias_en_exhibicion,
             "aviso_proyeccion": aviso_proyeccion,
@@ -618,7 +625,10 @@ def listar_predicciones(request):
             datos_grafica[pid] = {
                 "labels": [], "predicho": [], "inferior": [], "superior": [], "fechas": [],
             }
-            info_productos[pid] = {"nombre": p.producto.nombre, "upc": p.producto.codigo_upc}
+            info_productos[pid] = {
+                "nombre": p.producto.nombre, "upc": p.producto.codigo_upc,
+                "unidad_medida": p.producto.unidad_medida,
+            }
         fecha = p.fecha_pronosticada
         fecha_iso = fecha.isoformat()
         datos_grafica[pid]["labels"].append(fecha.strftime("%d/%m"))
@@ -678,13 +688,24 @@ def listar_recomendaciones(request):
             except ValueError:
                 continue
 
+            # Mismo criterio que MermaForm.clean_cantidad (ver forms.py):
+            # un ajuste con decimales no tiene lógica para un producto que
+            # se cuenta por pieza, solo para uno de peso variable.
+            if producto.unidad_medida != Producto.UnidadMedida.PESO and cantidad_ajustada != int(cantidad_ajustada):
+                messages.error(
+                    request,
+                    f"{producto.nombre} se maneja por unidad - el ajuste debe "
+                    "ser un número entero. No se guardó ese cambio.",
+                )
+                continue
+
             prediccion_semana = Prediccion.objects.filter(
                 producto=producto, fecha_prediccion=fecha_max
             ).aggregate(total=Sum("valor_predicho"))["total"] or 0
             stock_actual = Inventario.objects.filter(
                 producto=producto, fecha_vencimiento__gte=hoy
             ).aggregate(total=Sum("cantidad"))["total"] or 0
-            sugerido = max(0, round(prediccion_semana - stock_actual))
+            sugerido = max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
 
             if cantidad_ajustada == sugerido:
                 continue  # sin ajuste real: no vale la pena guardar historial
@@ -709,12 +730,13 @@ def listar_recomendaciones(request):
             producto=producto, fecha_vencimiento__gte=hoy
         ).aggregate(total=Sum("cantidad"))["total"] or 0
 
-        sugerido = max(0, round(prediccion_semana - stock_actual))
+        sugerido = max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
 
         recomendaciones.append({
             "producto_id": producto.id_producto,
             "producto": producto.nombre,
             "producto_upc": producto.codigo_upc,
+            "unidad_medida": producto.unidad_medida,
             "prediccion_semana": round(prediccion_semana, 1),
             "stock_actual": stock_actual,
             "sugerido": sugerido,
@@ -762,6 +784,7 @@ def historial_decisiones(request):
             "fecha_decision": h.fecha_decision,
             "producto_upc": h.producto.codigo_upc,
             "producto": h.producto.nombre,
+            "unidad_medida": h.producto.unidad_medida,
             "usuario": h.usuario.nombre if h.usuario else "—",
             "sugerido": h.cantidad_sugerida,
             "ajustado": h.cantidad_ajustada,
@@ -796,11 +819,17 @@ def generar_orden_compra(request):
         stock_actual = Inventario.objects.filter(
             producto=producto, fecha_vencimiento__gte=hoy
         ).aggregate(total=Sum("cantidad"))["total"] or 0
-        sugerido = max(0, round(prediccion_semana - stock_actual))
+        sugerido = max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
         if sugerido > 0:
             proveedor = producto.proveedor or "Sin proveedor"
+            # Peso variable en kg (con decimal); por unidad como número
+            # entero de piezas - mismo criterio que en pantalla.
+            if producto.unidad_medida == Producto.UnidadMedida.PESO:
+                texto_cantidad = f"{sugerido:.2f} kg"
+            else:
+                texto_cantidad = f"{sugerido:.0f} u."
             filas_por_proveedor.setdefault(proveedor, []).append(
-                [producto.codigo_upc or "—", producto.nombre, sugerido]
+                [producto.codigo_upc or "—", producto.nombre, texto_cantidad]
             )
 
     buffer = io.BytesIO()

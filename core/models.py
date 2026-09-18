@@ -20,6 +20,10 @@ class Producto(models.Model):
         VERDURAS = "VERDURAS", "Verduras"
         PANADERIA = "PANADERIA", "Panadería"
 
+    class UnidadMedida(models.TextChoices):
+        UNIDAD = "UNIDAD", "Unidad"
+        PESO = "PESO", "Peso (kg)"
+
     id_producto = models.AutoField(primary_key=True)
     nombre = models.CharField(max_length=200)
     codigo_upc = models.CharField(
@@ -30,6 +34,20 @@ class Producto(models.Model):
                    "unicidad - solo choca si de verdad se repite un código.",
     )
     categoria = models.CharField(max_length=50, choices=Categoria.choices)
+    unidad_medida = models.CharField(
+        max_length=10, choices=UnidadMedida.choices, default=UnidadMedida.UNIDAD,
+        help_text="UNIDAD: se cuenta por pieza completa (leche, pan, queso "
+                   "empacado) - las cantidades siempre son números enteros. "
+                   "PESO: producto de peso variable, se pesa suelto en caja "
+                   "(carnes, algunas frutas/verduras) - las cantidades se "
+                   "manejan en kilogramos y sí tienen sentido los decimales "
+                   "(ej. 0.9 kg). Reportado por Francisco al ver mermas con "
+                   "decimales sin sentido en productos que se cuentan por "
+                   "pieza (ver decisiones-and-learnings.md, 2026-09-17/18); "
+                   "es el mismo concepto que GS1 llama \"peso variable\" en "
+                   "sus códigos de barras (prefijo 2, peso codificado en el "
+                   "propio código).",
+    )
     vida_util_dias = models.PositiveIntegerField()
     proveedor = models.CharField(max_length=100, blank=True, default="")
     precio_compra = models.DecimalField(max_digits=10, decimal_places=2)
@@ -45,6 +63,19 @@ class Producto(models.Model):
 
     def __str__(self):
         return self.nombre
+
+    def redondear_cantidad(self, valor):
+        """Redondea una cantidad de este producto a la precisión que le
+        corresponde: 2 decimales en kg para peso variable (se pesa suelto
+        en caja), entero completo para productos que se cuentan por pieza
+        - no existe "0.9 quesos" (reportado por Francisco, 2026-09-17/18;
+        mismo concepto que la industria llama "peso variable" o "catch
+        weight"). Punto único usado por los generadores de datos
+        sintéticos y por las vistas que calculan cantidades sugeridas,
+        para que todos queden siempre consistentes entre sí."""
+        if self.unidad_medida == self.UnidadMedida.PESO:
+            return round(valor, 2)
+        return round(valor)
 
 
 class Venta(models.Model):
