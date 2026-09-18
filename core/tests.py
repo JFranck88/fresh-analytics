@@ -719,58 +719,93 @@ class AsignarUpcDemoTests(TestCase):
         self.assertEqual(self.sin_upc.codigo_upc, primer_codigo)
 
 
-class DashboardPrecisionModeloTests(TestCase):
-    """La tarjeta "Precisión del modelo" del dashboard (pedida por el
-    diseño de interfaz documentado, 5.3.2.1) es el MAPE promedio de las
-    predicciones de la corrida MÁS RECIENTE - no la validación cruzada
-    histórica de auditar_modelo, que es un análisis técnico aparte sobre
-    todo el catálogo junto y ya no se muestra en ninguna pantalla."""
+class DashboardKpisTests(TestCase):
+    """Dos tarjetas del dashboard reemplazadas a petición de Francisco
+    (2026-09-18): "Ventas de hoy" (dato real) siempre mostraba Q0,00
+    porque el job nocturno de datos sintéticos nunca genera ventas del
+    día en curso, solo hasta ayer - y "Precisión del modelo" (MAPE) es
+    una métrica que no le sirve al usuario final para decidir nada. Se
+    reemplazaron por "Venta esperada hoy" (pronóstico del propio modelo
+    para hoy, en Q) y "Productos a reabastecer hoy" (cuántos productos
+    tienen sugerido > 0 en Recomendaciones, misma fórmula factorizada en
+    calcular_cantidad_sugerida)."""
 
     def setUp(self):
-        self.comprador = crear_usuario("precision.comprador@test.com", Usuario.Rol.COMPRADOR)
-        self.producto = crear_producto()
+        self.comprador = crear_usuario("kpis.comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.producto = crear_producto(precio_venta=8.0)
+        self.producto2 = crear_producto(
+            nombre="Yogurt natural", upc="7501234500099", precio_venta=5.0,
+        )
 
-    def test_muestra_promedio_de_precision_de_la_corrida_mas_reciente(self):
+    def test_venta_esperada_hoy_suma_el_pronostico_de_hoy_de_todo_el_catalogo(self):
         hoy = timezone.localdate()
         Prediccion.objects.create(
             producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
             valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
-            precision_modelo=10.0,
         )
         Prediccion.objects.create(
+            producto=self.producto2, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=4, intervalo_inferior=2, intervalo_superior=6,
+        )
+        # Otro día del mismo pronóstico - no debe contarse en "hoy".
+        Prediccion.objects.create(
             producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy + timedelta(days=1),
-            valor_predicho=12, intervalo_inferior=6, intervalo_superior=18,
-            precision_modelo=20.0,
+            valor_predicho=999, intervalo_inferior=1, intervalo_superior=1,
         )
         self.client.force_login(self.comprador)
         respuesta = self.client.get(reverse("dashboard"))
-        self.assertEqual(respuesta.context["precision_modelo_promedio"], 15.0)
-        # Con LANGUAGE_CODE="es", floatformat usa coma como separador
-        # decimal (igual que el resto de la interfaz, ej. "Q 0,00") -
-        # "15,0%", no "15.0%".
-        self.assertContains(respuesta, "15,0%")
+        # 10*8.0 + 4*5.0 = 100.00
+        self.assertEqual(respuesta.context["venta_esperada_hoy"], 100.0)
+        self.assertContains(respuesta, "100,00")
 
-    def test_ignora_corridas_anteriores(self):
+    def test_venta_esperada_hoy_ignora_corridas_anteriores(self):
         hoy = timezone.localdate()
         Prediccion.objects.create(
             producto=self.producto, fecha_prediccion=hoy - timedelta(days=1), fecha_pronosticada=hoy,
-            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
-            precision_modelo=99.0,
+            valor_predicho=999, intervalo_inferior=1, intervalo_superior=1,
         )
         Prediccion.objects.create(
             producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
             valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
-            precision_modelo=10.0,
         )
         self.client.force_login(self.comprador)
         respuesta = self.client.get(reverse("dashboard"))
-        self.assertEqual(respuesta.context["precision_modelo_promedio"], 10.0)
+        self.assertEqual(respuesta.context["venta_esperada_hoy"], 80.0)
 
-    def test_nd_cuando_no_hay_predicciones(self):
+    def test_venta_esperada_hoy_es_cero_sin_predicciones(self):
         self.client.force_login(self.comprador)
         respuesta = self.client.get(reverse("dashboard"))
-        self.assertIsNone(respuesta.context["precision_modelo_promedio"])
-        self.assertContains(respuesta, "N/D")
+        self.assertEqual(respuesta.context["venta_esperada_hoy"], 0)
+
+    def test_productos_a_reabastecer_cuenta_solo_los_que_necesitan_reabasto(self):
+        hoy = timezone.localdate()
+        # producto: pronóstico 20, stock 5 -> sugerido 15 (cuenta)
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=20, intervalo_inferior=10, intervalo_superior=30,
+        )
+        Inventario.objects.create(
+            producto=self.producto, fecha_ingreso=hoy,
+            fecha_vencimiento=hoy + timedelta(days=5), cantidad=5,
+        )
+        # producto2: pronóstico 5, stock 10 -> sugerido 0 (no cuenta)
+        Prediccion.objects.create(
+            producto=self.producto2, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=5, intervalo_inferior=2, intervalo_superior=8,
+        )
+        Inventario.objects.create(
+            producto=self.producto2, fecha_ingreso=hoy,
+            fecha_vencimiento=hoy + timedelta(days=5), cantidad=10,
+        )
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.context["productos_a_reabastecer_hoy"], 1)
+        self.assertContains(respuesta, "Productos a reabastecer hoy")
+
+    def test_productos_a_reabastecer_es_cero_sin_predicciones(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.context["productos_a_reabastecer_hoy"], 0)
 
 
 class ListarPrediccionesTests(TestCase):

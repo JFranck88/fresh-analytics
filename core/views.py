@@ -135,16 +135,51 @@ def construir_contexto_inteligente(hoy):
     return mensajes
 
 
+def calcular_cantidad_sugerida(producto, fecha_prediccion_max, hoy):
+    """Cantidad sugerida de reabasto para un producto: la venta total
+    pronosticada para los próximos 7 días (corrida `fecha_prediccion_max`)
+    menos el stock vigente (lotes que todavía no vencen). Misma fórmula
+    que usa la pantalla de Recomendaciones (listar_recomendaciones) -
+    factorizada aquí para que el conteo de "Productos a reabastecer hoy"
+    del dashboard use exactamente el mismo criterio, sin reimplementarlo."""
+    prediccion_semana = Prediccion.objects.filter(
+        producto=producto, fecha_prediccion=fecha_prediccion_max
+    ).aggregate(total=Sum("valor_predicho"))["total"] or 0
+    stock_actual = Inventario.objects.filter(
+        producto=producto, fecha_vencimiento__gte=hoy
+    ).aggregate(total=Sum("cantidad"))["total"] or 0
+    return max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
+
+
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
 def dashboard(request):
     hoy = timezone.localdate()
 
-    ventas_hoy = Venta.objects.filter(fecha__date=hoy).aggregate(
-        total=Sum(
-            F("cantidad") * F("precio_unitario"),
-            output_field=DecimalField(max_digits=12, decimal_places=2),
-        )
-    )["total"] or 0
+    fecha_prediccion_max = Prediccion.objects.order_by(
+        "-fecha_prediccion"
+    ).values_list("fecha_prediccion", flat=True).first()
+    dias_desde_prediccion = (hoy - fecha_prediccion_max).days if fecha_prediccion_max else None
+    modelo_al_dia = dias_desde_prediccion is not None and dias_desde_prediccion == 0
+
+    # "Ventas de hoy" (venta real del día) siempre mostraba Q0,00: el job
+    # nocturno que arma el historial sintético (actualizar_historial_ventas)
+    # solo rellena hasta AYER, nunca el día en curso - el sistema no tiene
+    # una conexión en vivo a un punto de venta real. Reemplazada (decisión
+    # de Francisco, 2026-09-18) por la venta que el propio modelo espera
+    # para HOY: ya existe desde la corrida de esta madrugada (Prophet
+    # pronostica a partir de "hoy" - ver entrenar_modelo.py), nunca da 0
+    # sin motivo, y refuerza la parte de pronóstico del proyecto en vez
+    # de un dato que el sistema nunca puede llenar por sí mismo.
+    venta_esperada_hoy = 0
+    if fecha_prediccion_max:
+        venta_esperada_hoy = Prediccion.objects.filter(
+            fecha_prediccion=fecha_prediccion_max, fecha_pronosticada=hoy,
+        ).aggregate(
+            total=Sum(
+                F("valor_predicho") * F("producto__precio_venta"),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )["total"] or 0
 
     merma_hoy = Merma.objects.filter(fecha=hoy).aggregate(
         total=Sum("costo_perdida")
@@ -167,22 +202,17 @@ def dashboard(request):
         for a in alertas_qs
     ]
 
-    fecha_prediccion_max = Prediccion.objects.order_by(
-        "-fecha_prediccion"
-    ).values_list("fecha_prediccion", flat=True).first()
-    dias_desde_prediccion = (hoy - fecha_prediccion_max).days if fecha_prediccion_max else None
-    modelo_al_dia = dias_desde_prediccion is not None and dias_desde_prediccion == 0
-
-    # RF/diseño de interfaz (5.3.2.1): la tarjeta "Precisión del modelo"
-    # del dashboard es el MAPE promedio de las predicciones de la corrida
-    # más reciente - no la validación cruzada histórica de auditar_modelo
-    # (esa es un análisis técnico aparte, sobre todo el catálogo junto, y
-    # solo existe si se corrió ese comando manualmente).
-    precision_modelo_promedio = None
+    # "Precisión del modelo" (MAPE) tampoco le servía al usuario final -
+    # es una métrica estadística, no una acción a tomar. Reemplazada
+    # (decisión de Francisco, 2026-09-18) por cuántos productos necesitan
+    # reabasto HOY según Recomendaciones - conecta el dashboard con la
+    # tarea real y diaria del Comprador en vez de un número que solo le
+    # interesa a un perfil técnico.
+    productos_a_reabastecer_hoy = 0
     if fecha_prediccion_max:
-        precision_modelo_promedio = Prediccion.objects.filter(
-            fecha_prediccion=fecha_prediccion_max, precision_modelo__isnull=False,
-        ).aggregate(promedio=Avg("precision_modelo"))["promedio"]
+        for producto in Producto.objects.filter(activo=True):
+            if calcular_cantidad_sugerida(producto, fecha_prediccion_max, hoy) > 0:
+                productos_a_reabastecer_hoy += 1
 
     inicio_semana = hoy - timedelta(days=6)
     ventas_diarias = (
@@ -205,7 +235,7 @@ def dashboard(request):
 
     contexto = {
         "usuario": request.user,
-        "ventas_hoy": ventas_hoy,
+        "venta_esperada_hoy": venta_esperada_hoy,
         "merma_hoy": merma_hoy,
         "por_vencer_semana": sum(1 for a in alertas if a["tipo"] == "Vencimiento"),
         # El KPI de "por vencer" cuenta alertas de tipo Vencimiento, que ya
@@ -214,7 +244,7 @@ def dashboard(request):
         # el valor real es el que esté configurado aquí (default 3) - se
         # pasa al contexto para que la plantilla muestre el número correcto.
         "dias_alerta_vencimiento": int(obtener_parametro("dias_alerta_vencimiento", 3)),
-        "precision_modelo_promedio": precision_modelo_promedio,
+        "productos_a_reabastecer_hoy": productos_a_reabastecer_hoy,
         "alertas": alertas,
         "mensajes_contexto": construir_contexto_inteligente(hoy),
         "modelo_al_dia": modelo_al_dia,

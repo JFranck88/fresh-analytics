@@ -31,8 +31,8 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <p class="kpi-etiqueta mb-0">Ventas de hoy</p>
-                        <p class="kpi-valor mb-0">Q {{ ventas_hoy|floatformat:2 }}</p>
+                        <p class="kpi-etiqueta mb-0">Venta esperada hoy</p>
+                        <p class="kpi-valor mb-0">Q {{ venta_esperada_hoy|floatformat:2 }}</p>
                     </div>
                     <div class="kpi-icono kpi-icono-brote"><i class="bi bi-cash-coin"></i></div>
                 </div>
@@ -70,10 +70,10 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <p class="kpi-etiqueta mb-0">Precisión del modelo</p>
-                        <p class="kpi-valor mb-0">{% if precision_modelo_promedio %}{{ precision_modelo_promedio|floatformat:1 }}%{% else %}N/D{% endif %}</p>
+                        <p class="kpi-etiqueta mb-0">Productos a reabastecer hoy</p>
+                        <p class="kpi-valor mb-0">{{ productos_a_reabastecer_hoy }}</p>
                     </div>
-                    <div class="kpi-icono kpi-icono-modelo"><i class="bi bi-bullseye"></i></div>
+                    <div class="kpi-icono kpi-icono-modelo"><i class="bi bi-basket3"></i></div>
                 </div>
             </div>
         </div>
@@ -82,7 +82,7 @@
 
 <div class="card mb-4">
     <div class="card-body">
-        <h6 class="mb-2"><i class="bi bi-bar-chart-line me-2"></i>Ventas de los últimos 7 días</h6>
+        <h6 class="mb-2"><i class="bi bi-bar-chart-line me-2"></i>Ventas de los últimos 7 días - Departamento de Alimentos Frescos</h6>
         <canvas id="grafica-ventas-semana" height="80"></canvas>
     </div>
 </div>
