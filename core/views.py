@@ -104,7 +104,106 @@ def categorias_afectadas_por_lluvia(fecha_lluvia):
     return categorias
 
 
-def construir_contexto_inteligente(hoy):
+def calcular_riesgo_por_producto(hoy, clima_por_dia, producto_id=None):
+    """Cálculo compartido entre la pantalla `riesgo_descomposicion` y el
+    aviso de calor de `construir_contexto_inteligente` (petición de
+    Francisco, 2026-09-18: "sacarle provecho" al pronóstico del clima en
+    vez de solo mostrarlo) - una sola fila por producto de Frutas/
+    Verduras, con el lote más antiguo como peor caso (ver
+    riesgo_descomposicion.py), más la proyección día a día con el
+    pronóstico. Factorizado aquí para no repetir esta lógica en dos
+    lugares - antes solo vivía dentro de la vista `riesgo_descomposicion`.
+
+    Devuelve (filas, temp_max_hoy, humedad_promedio_hoy). Cada fila trae
+    "dias_proyectados" (lista de {"fecha", "nivel"}) además de los campos
+    que ya usa la plantilla de Riesgo climático - quien no lo necesite
+    (como el aviso de calor) simplemente lo ignora."""
+    clima_hoy = clima_por_dia.get(hoy, {})
+    temp_max = clima_hoy.get("temp_max")
+    humedad_promedio = clima_hoy.get("humedad_promedio")
+
+    lotes_qs = (
+        Inventario.objects.filter(
+            producto__categoria__in=[
+                Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS,
+            ],
+            cantidad__gt=0,
+            fecha_vencimiento__gte=hoy,
+        )
+        .select_related("producto")
+        .order_by("fecha_ingreso")
+    )
+    if producto_id:
+        lotes_qs = lotes_qs.filter(producto_id=producto_id)
+
+    lotes_por_producto = {}
+    for lote in lotes_qs:
+        lotes_por_producto.setdefault(lote.producto_id, []).append(lote)
+
+    filas = []
+    for lotes_del_producto in lotes_por_producto.values():
+        producto = lotes_del_producto[0].producto
+        lote_mas_antiguo = min(lotes_del_producto, key=lambda l: l.fecha_ingreso)
+        cantidad_total = sum(l.cantidad for l in lotes_del_producto)
+
+        dias_en_exhibicion = (hoy - lote_mas_antiguo.fecha_ingreso).days
+        vida_util_dias = producto.vida_util_dias
+        riesgo = calcular_riesgo_lote(dias_en_exhibicion, vida_util_dias, temp_max, humedad_promedio)
+
+        dias_proyectados = []
+        for fecha_futura in sorted(clima_por_dia):
+            if fecha_futura <= hoy or fecha_futura >= lote_mas_antiguo.fecha_vencimiento:
+                continue
+            offset = (fecha_futura - hoy).days
+            datos_dia = clima_por_dia[fecha_futura]
+            riesgo_futuro = calcular_riesgo_lote(
+                dias_en_exhibicion + offset,
+                vida_util_dias,
+                datos_dia.get("temp_max"),
+                datos_dia.get("humedad_promedio"),
+            )
+            dias_proyectados.append({"fecha": fecha_futura, "nivel": riesgo_futuro["nivel"]})
+
+        filas.append({
+            "producto": producto.nombre,
+            "producto_upc": producto.codigo_upc,
+            "categoria": producto.get_categoria_display(),
+            "cantidad_total": cantidad_total,
+            "num_lotes": len(lotes_del_producto),
+            "unidad_medida": producto.unidad_medida,
+            "dias_en_exhibicion": dias_en_exhibicion,
+            "dias_proyectados": dias_proyectados,
+            **riesgo,
+        })
+
+    filas.sort(key=lambda fila: fila["puntaje"], reverse=True)
+    return filas, temp_max, humedad_promedio
+
+
+def productos_en_riesgo_por_calor(filas_riesgo):
+    """Petición de Francisco (2026-09-18): en vez de un aviso genérico de
+    calor, reutiliza el mismo cálculo de Riesgo climático (ver
+    `calcular_riesgo_por_producto`) para encontrar el día más próximo del
+    pronóstico en el que al menos un producto de Frutas/Verduras pasaría
+    a riesgo ALTO por primera vez (si ya está en ALTO hoy, no es un aviso
+    nuevo). Devuelve (fecha, cantidad_de_productos), o (None, 0) si
+    ninguno sube a ALTO dentro de la ventana del pronóstico."""
+    productos_por_fecha = {}
+    for fila in filas_riesgo:
+        if fila["nivel"] == "ALTO":
+            continue
+        for dia in fila["dias_proyectados"]:
+            if dia["nivel"] == "ALTO":
+                productos_por_fecha.setdefault(dia["fecha"], set()).add(fila["producto"])
+                break
+
+    if not productos_por_fecha:
+        return None, 0
+    primera_fecha = min(productos_por_fecha)
+    return primera_fecha, len(productos_por_fecha[primera_fecha])
+
+
+def construir_contexto_inteligente(hoy, clima_por_dia=None):
     mensajes = []
 
     if hoy.day in DIAS_QUINCENA:
@@ -137,6 +236,31 @@ def construir_contexto_inteligente(hoy):
 
             mensajes.append({"icono": "🌧️", "texto": texto})
             break
+
+    # Petición de Francisco (2026-09-18): no solo mostrar un ícono de
+    # clima decorativo - el pronóstico ya alimenta el ajuste de
+    # predicciones de venta (arriba) y también el cálculo real de Riesgo
+    # climático (core/riesgo_descomposicion.py). Este aviso conecta las
+    # dos cosas: en vez de "hace calor, cuidado con las frutas", dice
+    # cuántos productos van a subir de nivel de riesgo, con el mismo
+    # cálculo que ya usa esa pantalla - no un número inventado.
+    if clima_por_dia is None:
+        clima_por_dia = pronostico_temperatura_humedad_por_dia()
+    if clima_por_dia:
+        filas_riesgo, _, _ = calcular_riesgo_por_producto(hoy, clima_por_dia)
+        fecha_calor, cantidad_calor = productos_en_riesgo_por_calor(filas_riesgo)
+        if fecha_calor and fecha_calor <= hoy + timedelta(days=4):
+            nombre_dia = DIAS_SEMANA_ES[fecha_calor.weekday()]
+            temp_dia = clima_por_dia.get(fecha_calor, {}).get("temp_max")
+            temp_texto = f" ({round(temp_dia)}°C)" if temp_dia is not None else ""
+            palabra_producto = "producto" if cantidad_calor == 1 else "productos"
+            verbo_subir = "subirá" if cantidad_calor == 1 else "subirán"
+            texto = (
+                f"Se pronostica calor el {nombre_dia}{temp_texto} - {cantidad_calor} "
+                f"{palabra_producto} de Frutas/Verduras {verbo_subir} a riesgo ALTO ese día. "
+                "Revisa Riesgo climático."
+            )
+            mensajes.append({"icono": "🌡️", "texto": texto})
 
     return mensajes
 
@@ -669,9 +793,6 @@ def riesgo_descomposicion(request):
     # extra, en su propia pantalla.
     hoy = timezone.localdate()
     clima_por_dia = pronostico_temperatura_humedad_por_dia()
-    clima_hoy = clima_por_dia.get(hoy, {})
-    temp_max = clima_hoy.get("temp_max")
-    humedad_promedio = clima_hoy.get("humedad_promedio")
 
     # Filtro opcional por producto (bug reportado por Francisco): el
     # buscador global de la topbar puede traer aquí un producto puntual
@@ -686,30 +807,6 @@ def riesgo_descomposicion(request):
         Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS,
     )
 
-    lotes_qs = (
-        Inventario.objects.filter(
-            producto__categoria__in=[
-                Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS,
-            ],
-            cantidad__gt=0,
-            # Solo lotes que TODAVÍA no llegan a su fecha_vencimiento
-            # (estimada como fecha_ingreso + vida_util_dias). Sin este
-            # filtro, los 2 años de historial sintético dejan miles de
-            # lotes viejísimos con cantidad > 0 (el generador de datos de
-            # prueba nunca "consume" el inventario) - salían lotes con
-            # cientos de días en exhibición, algo imposible en la vida
-            # real. Esta pantalla es para anticiparse ANTES de que un
-            # lote llegue a su fecha, no para auditar lotes que ya la
-            # pasaron hace mucho - de eso ya se encarga la alerta de
-            # Vencimiento existente (generar_alertas.py).
-            fecha_vencimiento__gte=hoy,
-        )
-        .select_related("producto")
-        .order_by("fecha_ingreso")
-    )
-    if producto_id:
-        lotes_qs = lotes_qs.filter(producto_id=producto_id)
-
     # Agrupado por producto, no por lote (decisión con Francisco,
     # 2026-09-18): Frutas y Verduras no traen ninguna marca física de
     # lote (a diferencia de Lácteos/Carnes, que sí traen fecha impresa),
@@ -720,63 +817,27 @@ def riesgo_descomposicion(request):
     # producto, con la cantidad sumada entre todos sus lotes vigentes, y
     # el riesgo calculado con el lote MÁS ANTIGUO (peor caso) - si no se
     # pueden distinguir a simple vista, hay que asumir que cualquier
-    # pieza podría ser la más vieja del montón, no la más nueva.
-    lotes_por_producto = {}
-    for lote in lotes_qs:
-        lotes_por_producto.setdefault(lote.producto_id, []).append(lote)
+    # pieza podría ser la más vieja del montón, no la más nueva. Cálculo
+    # factorizado en `calcular_riesgo_por_producto` porque el aviso de
+    # calor de Dashboard/Predicciones (ver construir_contexto_inteligente)
+    # reutiliza exactamente esta misma lógica.
+    filas, temp_max, humedad_promedio = calcular_riesgo_por_producto(
+        hoy, clima_por_dia, producto_id=producto_id or None,
+    )
 
-    filas = []
-    for lotes_del_producto in lotes_por_producto.values():
-        producto = lotes_del_producto[0].producto
-        lote_mas_antiguo = min(lotes_del_producto, key=lambda l: l.fecha_ingreso)
-        cantidad_total = sum(l.cantidad for l in lotes_del_producto)
-
-        dias_en_exhibicion = (hoy - lote_mas_antiguo.fecha_ingreso).days
-        vida_util_dias = producto.vida_util_dias
-        riesgo = calcular_riesgo_lote(dias_en_exhibicion, vida_util_dias, temp_max, humedad_promedio)
-
-        # Proyección a los próximos días del pronóstico (petición de
-        # Francisco): en vez de una tabla día por día, solo un aviso
-        # corto para cuando el riesgo vaya a SUBIR de nivel respecto a
-        # hoy. Se proyecta usando el lote más antiguo (mismo criterio de
-        # peor caso), como máximo hasta un día antes de que ESE lote
-        # llegue a su fecha_vencimiento.
-        dias_proyectados = []
-        for fecha_futura in sorted(clima_por_dia):
-            if fecha_futura <= hoy or fecha_futura >= lote_mas_antiguo.fecha_vencimiento:
-                continue
-            offset = (fecha_futura - hoy).days
-            datos_dia = clima_por_dia[fecha_futura]
-            riesgo_futuro = calcular_riesgo_lote(
-                dias_en_exhibicion + offset,
-                vida_util_dias,
-                datos_dia.get("temp_max"),
-                datos_dia.get("humedad_promedio"),
-            )
-            dias_proyectados.append({"fecha": fecha_futura, "nivel": riesgo_futuro["nivel"]})
-
-        dia_que_sube = primer_dia_que_sube_de_nivel(riesgo["nivel"], dias_proyectados)
-        aviso_proyeccion = None
+    # Proyección a los próximos días del pronóstico (petición de
+    # Francisco): en vez de una tabla día por día, solo un aviso corto
+    # para cuando el riesgo vaya a SUBIR de nivel respecto a hoy.
+    for fila in filas:
+        dia_que_sube = primer_dia_que_sube_de_nivel(fila["nivel"], fila["dias_proyectados"])
+        fila["aviso_proyeccion"] = None
         if dia_que_sube:
-            aviso_proyeccion = (
+            fila["aviso_proyeccion"] = (
                 f"Sube a {dia_que_sube['nivel']} el "
                 f"{DIAS_SEMANA_ES[dia_que_sube['fecha'].weekday()]} "
                 f"({dia_que_sube['fecha'].strftime('%d/%m')})"
             )
-
-        filas.append({
-            "producto": producto.nombre,
-            "producto_upc": producto.codigo_upc,
-            "categoria": producto.get_categoria_display(),
-            "cantidad_total": cantidad_total,
-            "num_lotes": len(lotes_del_producto),
-            "unidad_medida": producto.unidad_medida,
-            "dias_en_exhibicion": dias_en_exhibicion,
-            "aviso_proyeccion": aviso_proyeccion,
-            **riesgo,
-        })
-
-    filas.sort(key=lambda fila: fila["puntaje"], reverse=True)
+        del fila["dias_proyectados"]  # solo lo necesitaba este cálculo, no la plantilla
 
     contexto = {
         "filas": filas,
@@ -792,7 +853,20 @@ def riesgo_descomposicion(request):
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
 def listar_predicciones(request):
     hoy = timezone.localdate()
-    mensajes_contexto = construir_contexto_inteligente(hoy)
+
+    # Clima y probabilidad de lluvia por día (misma fuente que ya usa esta
+    # pantalla para el punto naranja de "día de lluvia" y el aviso de
+    # arriba) - se reutilizan aquí para el detalle que aparece al hacer
+    # clic en un punto de la gráfica (petición de Francisco: ver el
+    # pronóstico del tiempo de ESE día en particular, no solo si llueve
+    # o no). El plan gratuito de OpenWeatherMap solo cubre ~5 días, así
+    # que los días más lejanos del rango de 7 simplemente no van a tener
+    # clima disponible - se avisa en vez de mostrar un dato inventado. Se
+    # obtiene una sola vez y se le pasa a construir_contexto_inteligente
+    # para que el aviso de calor no dispare una segunda consulta a la API.
+    clima_por_dia = pronostico_temperatura_humedad_por_dia()
+    lluvia_por_dia = pronostico_lluvia_real()
+    mensajes_contexto = construir_contexto_inteligente(hoy, clima_por_dia)
 
     fecha_max = Prediccion.objects.order_by("-fecha_prediccion").values_list(
         "fecha_prediccion", flat=True
@@ -803,17 +877,6 @@ def listar_predicciones(request):
         .select_related("producto")
         .order_by("producto__nombre", "fecha_pronosticada")
     )
-
-    # Clima y probabilidad de lluvia por día (misma fuente que ya usa esta
-    # pantalla para el punto naranja de "día de lluvia" y el aviso de
-    # arriba) - se reutilizan aquí para el detalle que aparece al hacer
-    # clic en un punto de la gráfica (petición de Francisco: ver el
-    # pronóstico del tiempo de ESE día en particular, no solo si llueve
-    # o no). El plan gratuito de OpenWeatherMap solo cubre ~5 días, así
-    # que los días más lejanos del rango de 7 simplemente no van a tener
-    # clima disponible - se avisa en vez de mostrar un dato inventado.
-    clima_por_dia = pronostico_temperatura_humedad_por_dia()
-    lluvia_por_dia = pronostico_lluvia_real()
 
     datos_grafica = {}
     info_productos = {}

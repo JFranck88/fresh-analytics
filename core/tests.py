@@ -1613,6 +1613,123 @@ class RiesgoDescomposicionAgrupadoPorProductoTests(TestCase):
         self.assertEqual(fila["dias_en_exhibicion"], 6)
 
 
+class ProductosEnRiesgoPorCalorTests(TestCase):
+    """Petición de Francisco (2026-09-18): "sacarle provecho" al
+    pronóstico del clima en vez de solo mostrarlo - el aviso de calor de
+    Dashboard/Predicciones reutiliza el mismo cálculo de Riesgo climático
+    (`calcular_riesgo_por_producto`) para avisar CUÁNTOS productos van a
+    subir a riesgo ALTO, no un texto genérico. `productos_en_riesgo_por_calor`
+    es una función pura sobre las "filas" que ya devuelve ese cálculo, así
+    que estas pruebas arman las filas a mano sin tocar la base de datos."""
+
+    def _fila(self, producto, nivel_hoy, dias_proyectados):
+        return {"producto": producto, "nivel": nivel_hoy, "dias_proyectados": dias_proyectados}
+
+    def test_ningun_producto_sube_a_alto_no_avisa(self):
+        from .views import productos_en_riesgo_por_calor
+
+        hoy = timezone.localdate()
+        filas = [self._fila("Manzana roja", "MEDIO", [
+            {"fecha": hoy + timedelta(days=1), "nivel": "MEDIO"},
+        ])]
+        fecha, cantidad = productos_en_riesgo_por_calor(filas)
+        self.assertIsNone(fecha)
+        self.assertEqual(cantidad, 0)
+
+    def test_producto_ya_en_alto_hoy_no_cuenta_como_aviso_nuevo(self):
+        from .views import productos_en_riesgo_por_calor
+
+        hoy = timezone.localdate()
+        filas = [self._fila("Manzana roja", "ALTO", [
+            {"fecha": hoy + timedelta(days=1), "nivel": "ALTO"},
+        ])]
+        fecha, cantidad = productos_en_riesgo_por_calor(filas)
+        self.assertIsNone(fecha)
+        self.assertEqual(cantidad, 0)
+
+    def test_detecta_el_primer_dia_y_cuenta_los_productos_de_ese_dia(self):
+        from .views import productos_en_riesgo_por_calor
+
+        hoy = timezone.localdate()
+        pasado_mañana = hoy + timedelta(days=2)
+        filas = [
+            self._fila("Manzana roja", "MEDIO", [
+                {"fecha": hoy + timedelta(days=1), "nivel": "MEDIO"},
+                {"fecha": pasado_mañana, "nivel": "ALTO"},
+            ]),
+            self._fila("Lechuga", "BAJO", [
+                {"fecha": pasado_mañana, "nivel": "ALTO"},
+            ]),
+            # Este sube a ALTO más tarde - no debe contarse en el primer día.
+            self._fila("Tomate", "BAJO", [
+                {"fecha": hoy + timedelta(days=4), "nivel": "ALTO"},
+            ]),
+        ]
+        fecha, cantidad = productos_en_riesgo_por_calor(filas)
+        self.assertEqual(fecha, pasado_mañana)
+        self.assertEqual(cantidad, 2)
+
+    def test_un_producto_cuenta_una_sola_vez_aunque_varios_dias_sean_alto(self):
+        from .views import productos_en_riesgo_por_calor
+
+        hoy = timezone.localdate()
+        filas = [self._fila("Manzana roja", "BAJO", [
+            {"fecha": hoy + timedelta(days=1), "nivel": "ALTO"},
+            {"fecha": hoy + timedelta(days=2), "nivel": "ALTO"},
+        ])]
+        fecha, cantidad = productos_en_riesgo_por_calor(filas)
+        self.assertEqual(fecha, hoy + timedelta(days=1))
+        self.assertEqual(cantidad, 1)
+
+
+class AvisoDeCalorEnContextoInteligenteTests(TestCase):
+    """`construir_contexto_inteligente` (Dashboard/Predicciones) de punta a
+    punta: mismo fixture que RiesgoDescomposicionVistaTests (Manzana roja,
+    6 días en exhibición -> MEDIO sin clima), pero probando el mensaje que
+    se arma para el usuario, no la pantalla de Riesgo climático."""
+
+    def setUp(self):
+        self.manzana = crear_producto(
+            nombre="Manzana roja", upc="1111111111", categoria=Producto.Categoria.FRUTAS,
+        )
+        hoy = timezone.localdate()
+        Inventario.objects.create(
+            producto=self.manzana, fecha_ingreso=hoy - timedelta(days=6),
+            fecha_vencimiento=hoy + timedelta(days=8), cantidad=10, lote="L1",
+        )
+
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_avisa_calor_cuando_un_producto_sube_a_alto(self, _mock_lluvia):
+        from .views import construir_contexto_inteligente
+
+        hoy = timezone.localdate()
+        jueves = hoy + timedelta(days=3)
+        clima_por_dia = {jueves: {"temp_max": 35.0, "humedad_promedio": 90.0}}
+        mensajes = construir_contexto_inteligente(hoy, clima_por_dia)
+        mensaje_calor = next((m for m in mensajes if m["icono"] == "🌡️"), None)
+        self.assertIsNotNone(mensaje_calor)
+        self.assertIn("1 producto", mensaje_calor["texto"])
+        self.assertIn("35", mensaje_calor["texto"])
+        self.assertIn("Riesgo climático", mensaje_calor["texto"])
+
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_no_avisa_calor_si_ningun_producto_sube_de_nivel(self, _mock_lluvia):
+        from .views import construir_contexto_inteligente
+
+        hoy = timezone.localdate()
+        mañana = hoy + timedelta(days=1)
+        clima_por_dia = {mañana: {"temp_max": 18.0, "humedad_promedio": 40.0}}
+        mensajes = construir_contexto_inteligente(hoy, clima_por_dia)
+        self.assertIsNone(next((m for m in mensajes if m["icono"] == "🌡️"), None))
+
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_sin_datos_de_clima_no_revienta_ni_avisa(self, _mock_lluvia):
+        from .views import construir_contexto_inteligente
+
+        mensajes = construir_contexto_inteligente(timezone.localdate(), {})
+        self.assertIsNone(next((m for m in mensajes if m["icono"] == "🌡️"), None))
+
+
 class ListarMermasFiltroPorProductoTests(TestCase):
     """Mismo criterio que RiesgoDescomposicionFiltroPorProductoTests: el
     buscador global también puede traer aquí un producto puntual desde
