@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h5 class="mb-1">Riesgo climático de descomposición</h5>
-<p class="text-muted small">Frutas y verduras no traen una fecha de caducidad impresa, ni ninguna marca que distinga a qué lote pertenece cada pieza una vez que están en el anaquel. Por eso el riesgo se muestra por producto, no por lote: se toma el lote más antiguo de cada producto (el peor caso) y se combina qué porcentaje de su propia vida útil lleva consumido (no días absolutos - un producto que dura 5 días y uno que dura 15 no se comparan igual) con el clima de hoy, para señalar cuáles conviene revisar primero.</p>
+<h5 class="mb-3">Riesgo climático de descomposición</h5>
 
 {% if not clima_disponible %}
     <div class="alert alert-light border d-flex align-items-center gap-2 mb-3 py-2">
