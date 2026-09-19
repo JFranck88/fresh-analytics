@@ -75,6 +75,27 @@ class AutenticacionTests(TestCase):
         self.assertEqual(respuesta.status_code, 302)
         self.assertIn(reverse("login"), respuesta.url)
 
+    def test_pagina_protegida_no_se_puede_guardar_en_cache_del_navegador(self):
+        """Reportado en producción: después de cerrar sesión, a veces el
+        navegador seguía mostrando el Dashboard con la sesión anterior al
+        reabrirlo - intermitente porque Django no mandaba Cache-Control y
+        el navegador decidía, caso por caso, si servía su copia en caché
+        en vez de pedirle la página de nuevo al servidor. rol_requerido
+        ahora fuerza never_cache en toda vista protegida."""
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertIn("no-store", respuesta.headers["Cache-Control"])
+
+    def test_despues_de_cerrar_sesion_la_pagina_protegida_ya_no_es_accesible(self):
+        self.client.force_login(self.comprador)
+        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
+
+        self.client.post(reverse("logout"))
+
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse("login"), respuesta.url)
+
     def test_login_actualiza_last_login_y_se_ve_en_listar_usuarios(self):
         """Usuario no guarda un 'ultimo_acceso' propio (ver migración 0007):
         usa el last_login que Django ya trae y actualiza solo en cada login.
