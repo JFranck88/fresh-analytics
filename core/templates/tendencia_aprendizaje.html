@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h5 class="mb-1">Tendencia de aprendizaje del modelo</h5>
-<p class="text-muted small">Compara lo que el modelo predijo contra la venta real, y cómo evoluciona su margen de error con cada corrida - una forma de evaluar qué tan confiable es el modelo antes de basar decisiones de compra en sus pronósticos.</p>
+<p class="text-muted small">Compara, día a día, lo que el modelo predijo contra la venta real, y cómo se mantiene su margen de error promedio a lo largo del tiempo - una forma de evaluar qué tan confiable es el modelo antes de basar decisiones de compra en sus pronósticos.</p>
 
 <div class="card mb-4">
     <div class="card-body">
@@ -19,7 +19,7 @@
         </p>
         <div class="row">
             <div class="col-md-6 mb-3 mb-md-0">
-                <p class="text-muted small mb-1">Margen de error (MAPE) por corrida del modelo</p>
+                <p class="text-muted small mb-1">Margen de error (MAPE), promedio de los últimos 7 días</p>
                 <canvas id="grafica-precision-tendencia" height="180"></canvas>
             </div>
             <div class="col-md-6">

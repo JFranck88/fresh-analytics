@@ -1128,31 +1128,56 @@ class TendenciaAprendizajeModeloTests(TestCase):
     def setUp(self):
         self.producto = crear_producto(precio_venta=8.0)
 
-    def test_precision_por_producto_en_el_tiempo(self):
+    def test_precision_es_el_error_porcentual_promedio_de_los_ultimos_dias(self):
+        """Desde el 2026-09-26 el margen de error de esta gráfica ya no
+        sale de una prueba aparte (Prophet reentrenado sin los últimos 7
+        días - ver entrenar_modelo.py), sino de promediar, día a día, el
+        error real entre lo que se pronosticó a 1 día y la venta real -
+        el mismo par que ya muestra la gráfica de al lado. Se cambió
+        porque la prueba aparte, con una muestra de solo 7 días, podía
+        saltar de casi 0% a 25% de una corrida a otra sin que reflejara
+        ningún cambio real del modelo."""
         from .views import calcular_tendencia_aprendizaje
 
         hoy = timezone.localdate()
         ayer = hoy - timedelta(days=1)
         anteayer = hoy - timedelta(days=2)
-        for fecha, mape in [(anteayer, 20.0), (ayer, 15.0)]:
-            Prediccion.objects.create(
-                producto=self.producto, fecha_prediccion=fecha, fecha_pronosticada=fecha,
-                valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
-                precision_modelo=mape,
-            )
+        # anteayer: predijo 10, vendió 20 -> 50% de error.
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=anteayer - timedelta(days=1),
+            fecha_pronosticada=anteayer, valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+        )
+        Venta.objects.create(
+            producto=self.producto, fecha=timezone.now() - timedelta(days=2),
+            cantidad=20, precio_unitario=8.0,
+        )
+        # ayer: predijo 10, vendió 10 -> 0% de error.
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=anteayer, fecha_pronosticada=ayer,
+            valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
+        )
+        Venta.objects.create(
+            producto=self.producto, fecha=timezone.now() - timedelta(days=1),
+            cantidad=10, precio_unitario=8.0,
+        )
+
         resultado = calcular_tendencia_aprendizaje(hoy)
         pid = str(self.producto.id_producto)
-        self.assertEqual(resultado[pid]["precision"]["valores"], [20.0, 15.0])
+        indice = resultado[pid]["precision"]["labels"].index(ayer.strftime("%d/%m"))
+        # Promedio rodante hasta "ayer": (50% + 0%) / 2 = 25%.
+        self.assertEqual(resultado[pid]["precision"]["valores"][indice], 25.0)
 
-    def test_ignora_corridas_sin_mape(self):
+    def test_precision_ignora_dias_sin_venta_real_pero_no_revienta(self):
         from .views import calcular_tendencia_aprendizaje
 
         hoy = timezone.localdate()
+        ayer = hoy - timedelta(days=1)
         Prediccion.objects.create(
-            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            producto=self.producto, fecha_prediccion=hoy - timedelta(days=2), fecha_pronosticada=ayer,
             valor_predicho=10, intervalo_inferior=5, intervalo_superior=15,
-            precision_modelo=None,
         )
+        # No hay Venta real registrada para "ayer" - no debe generar
+        # ningún punto de error ni reventar por dividir entre cero.
         resultado = calcular_tendencia_aprendizaje(hoy)
         pid = str(self.producto.id_producto)
         self.assertEqual(resultado[pid]["precision"]["valores"], [])

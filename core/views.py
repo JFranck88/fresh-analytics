@@ -45,8 +45,24 @@ REGISTROS_POR_PAGINA = 25
 # Ventana de días hacia atrás que se usa para la "Tendencia de aprendizaje
 # del modelo" en Predicciones (petición del asesor de tesis, 2026-09-18):
 # suficiente para ver una tendencia real, sin acumular una gráfica
-# ilegible con meses de historial sintético.
-VENTANA_TENDENCIA_APRENDIZAJE_DIAS = 45
+# ilegible con meses de historial sintético. Se acortó de 45 a 10 días
+# (2026-09-26) para que la ventana mostrada quede siempre después del
+# incidente real de datos de inicios de septiembre (ver
+# claude/decisions-and-learnings.md): como esta ventana se calcula
+# siempre relativo a "hoy", entre más corta, más rápido deja atrás
+# cualquier tramo de historial dañado - se puede volver a alargar más
+# adelante, cuando haya más semanas de historial limpio acumulado.
+VENTANA_TENDENCIA_APRENDIZAJE_DIAS = 10
+
+# Cuántos días de error diario (predicho a 1 día vs. venta real) se
+# promedian para dibujar UN punto de la gráfica de margen de error. Antes
+# ese número salía de un "examen ciego" aparte (Prophet reentrenado sin
+# los últimos 7 días, ver entrenar_modelo.py) - se cambió (2026-09-26)
+# a un promedio rodante sobre el mismo par predicho/real que ya se
+# grafica al lado, para que las dos gráficas cuenten la misma historia y
+# no salten de un extremo a otro por depender de una muestra de solo 7
+# días sueltos.
+VENTANA_ERROR_RODANTE_DIAS = 7
 
 DIAS_SEMANA_ES = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
@@ -281,6 +297,13 @@ def calcular_cantidad_sugerida(producto, fecha_prediccion_max, hoy):
     return max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
 
 
+def _dias_ventana_rodante(dia_final, dias):
+    """Los `dias` días terminando en `dia_final` (incluido) - usado para
+    promediar el error porcentual de forma rodante en
+    calcular_tendencia_aprendizaje."""
+    return [dia_final - timedelta(days=offset) for offset in range(dias)]
+
+
 def calcular_tendencia_aprendizaje(hoy):
     """Petición del asesor de tesis (2026-09-18): en Predicciones no solo
     mostrar lo que el modelo pronostica, también cómo va "aprendiendo" a
@@ -289,32 +312,47 @@ def calcular_tendencia_aprendizaje(hoy):
     pronóstico. Devuelve, por producto (más la clave "departamento" para
     el agregado de todo el catálogo activo), dos series:
 
-    - precision: el MAPE (Prediccion.precision_modelo) de cada corrida
-      diaria del modelo, en el tiempo - responde "¿el margen de error
-      mejora o se mantiene a medida que el modelo entrena con más días
-      de venta real?".
     - predicho_real: para cada día YA resuelto (ya pasó), lo que el
       modelo pronosticó UN día antes (la corrida más inmediata para ese
       día - la que de verdad se usó operativamente) contra la venta real
       de ese mismo día - evidencia visual de qué tan cerca estuvo cada
       pronóstico, no solo una cifra de error.
+    - precision: el error porcentual de ESE MISMO par predicho/real,
+      promediado de forma rodante sobre los últimos
+      VENTANA_ERROR_RODANTE_DIAS días. Antes este número salía de una
+      prueba aparte (un modelo reentrenado sin los últimos 7 días de
+      historial, evaluado a ciegas contra esos 7 días - ver
+      `entrenar_modelo.py`); se cambió (2026-09-26, ver
+      claude/decisions-and-learnings.md) porque esa prueba, al depender
+      de una muestra de solo 7 días sueltos, podía saltar de un extremo
+      a otro (por ejemplo casi 0% una semana y 25% la siguiente) sin que
+      eso reflejara ningún cambio real en el modelo - confuso de
+      explicar y de defender. Calculándolo aquí, a partir de los mismos
+      valores que ya se grafican al lado, ambas gráficas cuentan
+      exactamente la misma historia: una en crudo día por día, la otra
+      resumida en un solo porcentaje que se actualiza cada día con la
+      última semana.
 
     Todo limitado a VENTANA_TENDENCIA_APRENDIZAJE_DIAS para que la
-    gráfica no crezca sin límite. El agregado departamental se expresa en
-    quetzales (valor_predicho/venta real × precio_venta), igual que
-    "Venta esperada hoy" del dashboard, porque no tiene sentido sumar
-    kilogramos con unidades entre productos de categorías distintas."""
+    gráfica no crezca sin límite (se trae además un colchón de
+    VENTANA_ERROR_RODANTE_DIAS días antes de eso, solo para poder
+    calcular el promedio rodante desde el primer día que se muestra). El
+    agregado departamental se expresa en quetzales (valor_predicho/venta
+    real × precio_venta), igual que "Venta esperada hoy" del dashboard,
+    porque no tiene sentido sumar kilogramos con unidades entre
+    productos de categorías distintas."""
     fecha_inicio = hoy - timedelta(days=VENTANA_TENDENCIA_APRENDIZAJE_DIAS)
+    fecha_inicio_datos = fecha_inicio - timedelta(days=VENTANA_ERROR_RODANTE_DIAS)
     productos = list(Producto.objects.filter(activo=True))
     precio_por_producto = {p.id_producto: float(p.precio_venta) for p in productos}
 
     # "A un día de anticipación": no es sencillo expresar de forma
     # portable con el ORM "fecha_pronosticada - fecha_prediccion == 1
     # día" restando dos DateField directamente en la base de datos, así
-    # que se trae la ventana completa y se filtra en Python.
+    # que se trae la ventana completa (con colchón) y se filtra en Python.
     predicho_1dia = {}
     filas_prediccion = Prediccion.objects.filter(
-        fecha_pronosticada__gte=fecha_inicio, fecha_pronosticada__lt=hoy,
+        fecha_pronosticada__gte=fecha_inicio_datos, fecha_pronosticada__lt=hoy,
     ).values("producto_id", "fecha_prediccion", "fecha_pronosticada", "valor_predicho")
     for fila in filas_prediccion:
         if (fila["fecha_pronosticada"] - fila["fecha_prediccion"]).days == 1:
@@ -322,7 +360,7 @@ def calcular_tendencia_aprendizaje(hoy):
 
     real_por_dia = {}
     filas_venta = (
-        Venta.objects.filter(fecha__date__gte=fecha_inicio, fecha__date__lt=hoy)
+        Venta.objects.filter(fecha__date__gte=fecha_inicio_datos, fecha__date__lt=hoy)
         .annotate(dia=TruncDate("fecha"))
         .values("producto_id", "dia")
         .annotate(total=Sum("cantidad"))
@@ -330,22 +368,7 @@ def calcular_tendencia_aprendizaje(hoy):
     for fila in filas_venta:
         real_por_dia[(fila["producto_id"], fila["dia"])] = fila["total"]
 
-    precision_por_producto = {}
-    filas_precision = (
-        Prediccion.objects.filter(
-            fecha_prediccion__gte=fecha_inicio, precision_modelo__isnull=False,
-        )
-        .values("producto_id", "fecha_prediccion")
-        .annotate(mape=Avg("precision_modelo"))
-        .order_by("fecha_prediccion")
-    )
-    for fila in filas_precision:
-        precision_por_producto.setdefault(fila["producto_id"], []).append(
-            (fila["fecha_prediccion"], round(fila["mape"], 2))
-        )
-
     resultado = {}
-    precision_dep_por_fecha = {}
     predicho_dep_por_dia = {}
     real_dep_por_dia = {}
 
@@ -353,44 +376,83 @@ def calcular_tendencia_aprendizaje(hoy):
         pid = str(producto.id_producto)
         precio = precio_por_producto[producto.id_producto]
 
-        puntos_precision = precision_por_producto.get(producto.id_producto, [])
-        for fecha, mape in puntos_precision:
-            precision_dep_por_fecha.setdefault(fecha, []).append(mape)
-
-        labels_pr_real = []
-        predicho_pr = []
-        real_pr = []
-        dia = fecha_inicio
+        predicho_por_dia_prod = {}
+        real_por_dia_prod = {}
+        dia = fecha_inicio_datos
         while dia < hoy:
             clave = (producto.id_producto, dia)
             p_val = predicho_1dia.get(clave)
             r_val = real_por_dia.get(clave)
+            if p_val is not None:
+                predicho_por_dia_prod[dia] = p_val
+                if dia >= fecha_inicio:
+                    predicho_dep_por_dia[dia] = predicho_dep_por_dia.get(dia, 0) + p_val * precio
+            if r_val is not None:
+                real_por_dia_prod[dia] = r_val
+                if dia >= fecha_inicio:
+                    real_dep_por_dia[dia] = real_dep_por_dia.get(dia, 0) + r_val * precio
+            dia += timedelta(days=1)
+
+        # Error porcentual día a día para este producto - el mismo par
+        # predicho/real de arriba, expresado como % de error (igual
+        # criterio que calcular_mape en entrenar_modelo.py: se ignoran
+        # los días sin venta real, ya que dividir entre 0 no tiene
+        # sentido).
+        error_diario_prod = {}
+        for dia_error, r_val in real_por_dia_prod.items():
+            p_val = predicho_por_dia_prod.get(dia_error)
+            if p_val is not None and r_val:
+                error_diario_prod[dia_error] = abs(r_val - p_val) / r_val * 100
+
+        labels_pr_real, predicho_pr, real_pr = [], [], []
+        labels_precision, valores_precision = [], []
+        dia = fecha_inicio
+        while dia < hoy:
+            p_val = predicho_por_dia_prod.get(dia)
+            r_val = real_por_dia_prod.get(dia)
             if p_val is not None or r_val is not None:
                 labels_pr_real.append(dia.strftime("%d/%m"))
                 predicho_pr.append(p_val)
                 real_pr.append(r_val)
-                if p_val is not None:
-                    predicho_dep_por_dia[dia] = predicho_dep_por_dia.get(dia, 0) + p_val * precio
-                if r_val is not None:
-                    real_dep_por_dia[dia] = real_dep_por_dia.get(dia, 0) + r_val * precio
+
+            errores_ventana = [
+                error_diario_prod[d] for d in _dias_ventana_rodante(dia, VENTANA_ERROR_RODANTE_DIAS)
+                if d in error_diario_prod
+            ]
+            if errores_ventana:
+                labels_precision.append(dia.strftime("%d/%m"))
+                valores_precision.append(round(sum(errores_ventana) / len(errores_ventana), 2))
+
             dia += timedelta(days=1)
 
         resultado[pid] = {
-            "precision": {
-                "labels": [f.strftime("%d/%m") for f, _ in puntos_precision],
-                "valores": [m for _, m in puntos_precision],
-            },
+            "precision": {"labels": labels_precision, "valores": valores_precision},
             "predicho_real": {
                 "labels": labels_pr_real, "predicho": predicho_pr, "real": real_pr,
             },
         }
 
-    labels_precision_dep = []
-    valores_precision_dep = []
-    for fecha in sorted(precision_dep_por_fecha):
-        valores = precision_dep_por_fecha[fecha]
-        labels_precision_dep.append(fecha.strftime("%d/%m"))
-        valores_precision_dep.append(round(sum(valores) / len(valores), 2))
+    # Departamento: mismo criterio, pero sobre el error del agregado en
+    # quetzales (no el promedio de los errores de cada producto por
+    # separado), para que sea consistente con lo que muestra su propia
+    # gráfica de predicho vs. real al lado.
+    error_diario_dep = {}
+    for dia_error, r_val in real_dep_por_dia.items():
+        p_val = predicho_dep_por_dia.get(dia_error)
+        if p_val is not None and r_val:
+            error_diario_dep[dia_error] = abs(r_val - p_val) / r_val * 100
+
+    labels_precision_dep, valores_precision_dep = [], []
+    dia = fecha_inicio
+    while dia < hoy:
+        errores_ventana = [
+            error_diario_dep[d] for d in _dias_ventana_rodante(dia, VENTANA_ERROR_RODANTE_DIAS)
+            if d in error_diario_dep
+        ]
+        if errores_ventana:
+            labels_precision_dep.append(dia.strftime("%d/%m"))
+            valores_precision_dep.append(round(sum(errores_ventana) / len(errores_ventana), 2))
+        dia += timedelta(days=1)
 
     dias_dep = sorted(set(predicho_dep_por_dia) | set(real_dep_por_dia))
     resultado["departamento"] = {
