@@ -16,6 +16,22 @@ CSRF_TRUSTED_ORIGINS = config(
     default="https://fresh-analytics.onrender.com"
 ).split(",")
 
+# Duración de la sesión (decisión de Francisco, 2026-09-29). Por defecto
+# Django mantiene la sesión abierta 2 semanas aunque se cierre el navegador
+# o se apague la máquina: se detectó al volver a entrar sin contraseña tras
+# un fin de semana. En una handheld compartida en el pasillo eso no es
+# aceptable, así que:
+#   - La sesión se cierra sola tras 1 hora SIN actividad.
+#   - Cada petición renueva ese plazo (SESSION_SAVE_EVERY_REQUEST), así que
+#     mientras el usuario esté trabajando nunca lo saca a media tarea.
+#   - Además la cookie no se guarda al cerrar el navegador. Algunos
+#     navegadores la restauran igual ("continuar donde lo dejaste"), por eso
+#     el límite real y confiable es la hora de inactividad, que se controla
+#     del lado del servidor.
+SESSION_COOKIE_AGE = 60 * 60
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
 # Endurecimiento de seguridad en producción (revisión de código 2026-09-29).
 # Render define la variable RENDER=true en todos sus servicios, así que
 # esto solo se activa allá: en la máquina local (runserver por http) y en

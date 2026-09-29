@@ -96,6 +96,40 @@ class AutenticacionTests(TestCase):
         self.assertEqual(respuesta.status_code, 302)
         self.assertIn(reverse("login"), respuesta.url)
 
+    def test_sesion_expira_tras_una_hora_sin_actividad(self):
+        """Decisión 2026-09-29: antes la sesión duraba 2 semanas (default de
+        Django) y se entraba sin contraseña tras un fin de semana con la
+        máquina apagada. Ahora caduca tras 1 hora sin actividad."""
+        from django.contrib.sessions.models import Session
+
+        self.client.post(reverse("login"), {
+            "username": "comprador@test.com", "password": "Clave-Segura-123",
+        })
+        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
+        self.assertTrue(self.client.session.get_expire_at_browser_close())
+        self.assertEqual(self.client.session.get_expiry_age(), 60 * 60)
+
+        # Simula que pasó más de una hora sin tocar el sistema.
+        Session.objects.update(expire_date=timezone.now() - timedelta(minutes=1))
+
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse("login"), respuesta.url)
+
+    def test_cada_peticion_renueva_la_hora_de_inactividad(self):
+        from django.contrib.sessions.models import Session
+
+        self.client.post(reverse("login"), {
+            "username": "comprador@test.com", "password": "Clave-Segura-123",
+        })
+        # Quedan solo 5 minutos de sesión...
+        Session.objects.update(expire_date=timezone.now() + timedelta(minutes=5))
+
+        # ...pero el usuario sigue trabajando: el plazo vuelve a ser 1 hora.
+        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
+        restante = Session.objects.get().expire_date - timezone.now()
+        self.assertGreater(restante, timedelta(minutes=55))
+
     def test_login_actualiza_last_login_y_se_ve_en_listar_usuarios(self):
         """Usuario no guarda un 'ultimo_acceso' propio (ver migración 0007):
         usa el last_login que Django ya trae y actualiza solo en cada login.
