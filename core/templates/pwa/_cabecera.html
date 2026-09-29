@@ -1,0 +1,18 @@
+{% load static %}
+{# FAs instalable como app (PWA): se incluye en el <head> de base.html y #}
+{# del login, para poder instalarla desde cualquiera de los dos. #}
+<link rel="manifest" href="{% url 'manifest_pwa' %}">
+<link rel="apple-touch-icon" href="{% static 'core/img/pwa/apple-touch-icon.png' %}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FAs">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script>
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+            navigator.serviceWorker.register("{% url 'service_worker' %}").catch(function () {
+                /* sin service worker FAs funciona igual, solo no es instalable */
+            });
+        });
+    }
+</script>

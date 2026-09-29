@@ -190,6 +190,24 @@
     function marcarTablaSinProducto(sinProducto) {
         const tabla = document.querySelector('.tabla-predicciones');
         if (tabla) tabla.classList.toggle('sin-producto', sinProducto);
+        // El aviso "Busca o escanea un producto" solo tiene sentido
+        // mientras no hay producto elegido.
+        const aviso = document.getElementById('aviso-elegir-producto');
+        if (aviso) aviso.classList.toggle('oculto', !sinProducto);
+    }
+
+    // Mismo formato que el resto del sistema: coma decimal y unidad
+    // (kg con 2 decimales, unidades enteras, quetzales en el departamento).
+    function formatearValor(pid, valor) {
+        if (valor === null || valor === undefined) return '—';
+        if (pid === null) {
+            return 'Q ' + valor.toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        const info = infoProductos[pid] || {};
+        if (info.unidad_medida === 'PESO') {
+            return valor.toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg';
+        }
+        return valor.toLocaleString('es', { maximumFractionDigits: 0 }) + ' u.';
     }
 
     let chartTendencia;
@@ -241,7 +259,14 @@
                 // en una pantalla de 6" esa proporción dejaba la gráfica de
                 // unos 90 px de alto, ilegible. Ahí se usa una más cuadrada.
                 ...(esPantallaMovil() ? { aspectRatio: 1.15 } : {}),
-                plugins: { legend: { display: true, position: 'bottom' } },
+                plugins: {
+                    legend: { display: true, position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => ctx.dataset.label + ': ' + formatearValor(pid, ctx.parsed.y),
+                        },
+                    },
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -300,7 +325,7 @@
     });
 </script>
 
-<p class="aviso-solo-movil text-muted small mb-2"><i class="bi bi-upc-scan me-1"></i>Busca o escanea un producto arriba para ver su pronóstico día por día.</p>
+<p class="aviso-solo-movil text-muted small mb-2" id="aviso-elegir-producto"><i class="bi bi-upc-scan me-1"></i>Busca o escanea un producto arriba para ver su pronóstico día por día.</p>
 <div class="card card-tabla-movil mb-4">
     <div class="card-body p-0">
         <table class="table table-striped mb-0 tabla-tarjetas tabla-predicciones">

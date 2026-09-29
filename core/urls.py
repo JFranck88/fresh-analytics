@@ -3,6 +3,10 @@ from . import views
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    # FAs instalable como app (PWA) - ver views.manifest_pwa
+    path("manifest.webmanifest", views.manifest_pwa, name="manifest_pwa"),
+    path("sw.js", views.service_worker, name="service_worker"),
+    path("sin-conexion/", views.sin_conexion, name="sin_conexion"),
     path("buscar/", views.buscar_global, name="buscar_global"),
     path("buscar/json/", views.buscar_global_json, name="buscar_global_json"),
     path("productos/buscar-json/", views.buscar_productos_json, name="buscar_productos_json"),

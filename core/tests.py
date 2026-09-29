@@ -2433,3 +2433,39 @@ class InterfazMovilTests(TestCase):
         for nombre in ("listar_usuarios", "listar_configuracion", "mantenimiento"):
             respuesta = self.client.get(reverse(nombre))
             self.assertContains(respuesta, 'class="table-responsive"', msg_prefix=nombre)
+
+
+class AppInstalablePwaTests(TestCase):
+    """FAs instalable como app en la handheld (PWA). El navegador pide el
+    manifiesto y el service worker ANTES de que haya sesión, así que las
+    tres rutas tienen que ser públicas y responder con el tipo correcto."""
+
+    def test_manifiesto_describe_la_app(self):
+        respuesta = self.client.get(reverse("manifest_pwa"))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta["Content-Type"], "application/manifest+json")
+        datos = json.loads(respuesta.content)
+        self.assertEqual(datos["name"], "Fresh Analytics")
+        self.assertEqual(datos["display"], "standalone")
+        self.assertEqual(datos["start_url"], "/")
+        tamanos = {icono["sizes"] for icono in datos["icons"]}
+        self.assertTrue({"192x192", "512x512"} <= tamanos)  # mínimo que exige Chrome para instalar
+        self.assertIn("maskable", {icono["purpose"] for icono in datos["icons"]})
+
+    def test_service_worker_se_sirve_desde_la_raiz_sin_cache(self):
+        respuesta = self.client.get("/sw.js")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn("javascript", respuesta["Content-Type"])
+        self.assertIn("no-cache", respuesta["Cache-Control"])
+        self.assertContains(respuesta, reverse("sin_conexion"))
+
+    def test_pantalla_sin_conexion_es_publica(self):
+        respuesta = self.client.get(reverse("sin_conexion"))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, "Sin conexión")
+
+    def test_login_y_pantallas_internas_enlazan_el_manifiesto(self):
+        self.assertContains(self.client.get(reverse("login")), 'rel="manifest"')
+        comprador = crear_usuario("comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.client.force_login(comprador)
+        self.assertContains(self.client.get(reverse("dashboard")), 'rel="manifest"')

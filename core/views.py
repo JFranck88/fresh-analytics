@@ -8,6 +8,9 @@ from django.db.models import Sum, F, Q, Avg, Max, DecimalField
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
+from django.templatetags.static import static
+from django.urls import reverse
+from django.views.decorators.cache import cache_control
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from reportlab.lib import colors
@@ -1382,3 +1385,60 @@ def mantenimiento(request):
         "productos_con_mape_alto": productos_con_mape_alto,
     }
     return render(request, "mantenimiento.html", contexto)
+
+# ---------------------------------------------------------------------------
+# FAs instalable como app (PWA) - semana 2 del plan de la fase final
+# (2026-09-29). Con estas tres vistas, Chrome en Android (la handheld
+# Generalscan T60) y Safari en iPhone ofrecen "Instalar" / "Agregar a
+# pantalla de inicio": FAs queda con su ícono y abre a pantalla completa,
+# sin la barra del navegador. Las tres son públicas a propósito: el
+# navegador las pide antes de que exista una sesión (incluso desde el login).
+# ---------------------------------------------------------------------------
+
+VERSION_PWA = "fas-v1"  # subir este número obliga a los celulares a renovar su caché
+
+
+def manifest_pwa(request):
+    """Ficha de la app: nombre, colores e íconos que usa el celular al
+    instalarla."""
+    datos = {
+        "id": "/",
+        "name": "Fresh Analytics",
+        "short_name": "FAs",
+        "description": "Soporte a la decisión de reabastecimiento de alimentos frescos.",
+        "lang": "es",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": "#F7F5F0",
+        "theme_color": "#1B4332",
+        "icons": [
+            {"src": static("core/img/pwa/icono-192.png"), "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": static("core/img/pwa/icono-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": static("core/img/pwa/icono-maskable-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    }
+    return JsonResponse(
+        datos, content_type="application/manifest+json",
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+@cache_control(no_cache=True, max_age=0)
+def service_worker(request):
+    """El service worker tiene que servirse desde la raíz del sitio (/sw.js)
+    para poder controlar todas las pantallas; desde /static/ solo alcanzaría
+    a /static/. no-cache: el navegador siempre revisa si hay versión nueva."""
+    return render(
+        request, "pwa/sw.js",
+        {"version": VERSION_PWA, "url_sin_conexion": reverse("sin_conexion")},
+        content_type="application/javascript",
+    )
+
+
+def sin_conexion(request):
+    """Pantalla que muestra la app instalada cuando se pierde la red (el
+    service worker la guarda de antemano). FAs necesita internet para sus
+    datos; esto solo evita la página de error genérica del navegador."""
+    return render(request, "pwa/sin_conexion.html")

@@ -722,3 +722,6 @@ a.topbar-buscador-item:hover {
 .aviso-solo-movil {
     display: none;
 }
+.aviso-solo-movil.oculto {
+    display: none !important;
+}
