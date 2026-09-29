@@ -113,6 +113,9 @@
             }]
         },
         options: {
+            // En 6" la proporción del <canvas> (height="80") dejaba barras
+            // de unos 80 px de alto; en pantallas pequeñas se usa una más alta.
+            ...(window.matchMedia('(max-width: 767.98px)').matches ? { aspectRatio: 1.4 } : {}),
             plugins: { legend: { display: false } },
             scales: { y: { beginAtZero: true } },
         }
@@ -129,12 +132,12 @@
         {% if alertas %}
             <div class="list-group list-group-flush">
                 {% for alerta in alertas %}
-                    <div class="list-group-item d-flex align-items-center gap-2 py-3">
+                    <div class="list-group-item d-flex align-items-center gap-2 py-3 alerta-fila">
                         <span class="badge bg-{{ alerta.nivel }}">&nbsp;</span>
                         <span class="flex-grow-1">
                             <strong>{{ alerta.producto }}</strong> — {{ alerta.mensaje }}
                         </span>
-                        <span class="text-muted small">{{ alerta.tipo }}{% if alerta.producto_upc %} · UPC {{ alerta.producto_upc }}{% endif %}</span>
+                        <span class="text-muted small alerta-meta">{{ alerta.tipo }}{% if alerta.producto_upc %} · UPC {{ alerta.producto_upc }}{% endif %}</span>
                     </div>
                 {% endfor %}
             </div>

@@ -2381,3 +2381,55 @@ class CrearAdminProduccionTests(TestCase):
         self.correr({"ADMIN_PASSWORD_INICIAL": "Otra-Clave-Segura-456"})
         existente.refresh_from_db()
         self.assertTrue(existente.check_password("Clave-Original-789"))
+
+
+class InterfazMovilTests(TestCase):
+    """Semana 2 del plan de la fase final (2026-09-29): FAs usable en la
+    handheld Generalscan T60 (6"). La verificación visual se hizo con
+    capturas a 360 px; aquí se protege el marcado del que depende, para
+    que un cambio futuro no rompa la vista móvil sin darse cuenta."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.administrador = crear_usuario("admin@test.com", Usuario.Rol.ADMINISTRADOR)
+        self.producto = crear_producto()
+        hoy = timezone.localdate()
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+            valor_predicho=20, intervalo_inferior=15, intervalo_superior=25, precision_modelo=10.0,
+        )
+        Merma.objects.create(
+            producto=self.producto, fecha=hoy, cantidad=1,
+            motivo=Merma.Motivo.VENCIMIENTO, costo_perdida=5,
+        )
+
+    def test_login_declara_viewport_movil(self):
+        """Sin esta etiqueta el celular dibuja el login como escritorio de
+        980 px y lo encoge (así estaba antes)."""
+        respuesta = self.client.get(reverse("login"))
+        self.assertContains(respuesta, 'name="viewport" content="width=device-width, initial-scale=1"')
+
+    def test_buscador_global_no_se_oculta_en_pantallas_pequenas(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("dashboard"))
+        self.assertContains(respuesta, 'class="topbar-buscador d-flex"')
+        self.assertNotContains(respuesta, "topbar-buscador d-none")
+
+    def test_pantallas_del_pasillo_usan_tablas_en_tarjetas(self):
+        self.client.force_login(self.comprador)
+        for nombre in ("listar_recomendaciones", "listar_mermas", "listar_predicciones"):
+            respuesta = self.client.get(reverse(nombre))
+            self.assertContains(respuesta, "tabla-tarjetas", msg_prefix=nombre)
+            self.assertContains(respuesta, 'class="celda-titulo"', msg_prefix=nombre)
+
+    def test_recomendaciones_etiqueta_cada_dato_para_la_tarjeta(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("listar_recomendaciones"))
+        for etiqueta in ("Predicción 7 días", "Stock actual", "Sugerido", "Ajustar (u.)"):
+            self.assertContains(respuesta, f'data-label="{etiqueta}"')
+
+    def test_tablas_administrativas_se_deslizan_dentro_de_su_recuadro(self):
+        self.client.force_login(self.administrador)
+        for nombre in ("listar_usuarios", "listar_configuracion", "mantenimiento"):
+            respuesta = self.client.get(reverse(nombre))
+            self.assertContains(respuesta, 'class="table-responsive"', msg_prefix=nombre)

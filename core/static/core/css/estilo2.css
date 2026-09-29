@@ -548,3 +548,177 @@ a.topbar-buscador-item:hover {
         padding: 18px;
     }
 }
+
+/* =====================================================================
+   FAs en móvil / handheld (Generalscan T60, pantalla de 6", ~360 px).
+   Semana 2 del plan de la fase final (2026-09-29). Todo lo de abajo vive
+   dentro de @media para pantallas pequeñas: en PC nada cambia.
+   ===================================================================== */
+
+/* Buscador global en la topbar: antes se ocultaba en pantallas pequeñas
+   (d-none d-md-flex) - justo en la handheld, donde más se necesita. */
+@media (max-width: 767.98px) {
+    .topbar {
+        padding: 10px 12px;
+        gap: 8px;
+    }
+    .topbar-toggle {
+        margin-right: 0;
+        padding: 6px;
+    }
+    .topbar-buscador {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: none;
+        margin-right: 0;
+        padding: 8px 14px;
+    }
+    .topbar-buscador input {
+        font-size: 16px; /* 16 px evita que el navegador haga zoom al escribir */
+    }
+    .topbar-espaciador {
+        display: none;
+    }
+    .topbar-usuario {
+        padding: 4px;
+    }
+    .topbar-usuario.dropdown-toggle::after {
+        display: none;
+    }
+    .topbar-buscador-resultados {
+        position: fixed;
+        top: 60px;
+        left: 12px;
+        right: 12px;
+        max-height: 70vh;
+    }
+    .topbar-buscador-item {
+        padding: 12px 10px; /* objetivos táctiles cómodos */
+    }
+}
+
+/* Tablas que en el celular se convierten en tarjetas (pantallas que se
+   usan en el pasillo: Recomendaciones, Riesgo climático, Mermas,
+   Predicciones). Cada <td> lleva data-label con el nombre de su columna. */
+@media (max-width: 767.98px) {
+    .card-tabla-movil {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .card-tabla-movil:hover {
+        transform: none;
+    }
+    .tabla-tarjetas thead {
+        display: none;
+    }
+    .tabla-tarjetas,
+    .tabla-tarjetas tbody {
+        display: block;
+        width: 100%;
+    }
+    .tabla-tarjetas tbody tr {
+        display: flex;
+        flex-direction: column;
+        background-color: #ffffff;
+        border: 1px solid rgba(27, 67, 50, 0.12);
+        border-radius: 12px;
+        padding: 10px 14px;
+        margin-bottom: 10px;
+    }
+    .tabla-tarjetas tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        padding: 5px 0;
+        border: none;
+        background: transparent !important;
+        box-shadow: none !important;
+        text-align: right;
+    }
+    .tabla-tarjetas tbody td[data-label]::before {
+        content: attr(data-label);
+        color: var(--musgo);
+        font-size: 12.5px;
+        text-align: left;
+        flex-shrink: 0;
+    }
+    .tabla-tarjetas tbody td.celda-titulo {
+        order: -2;
+        justify-content: flex-start;
+        text-align: left;
+        font-weight: 700;
+        font-size: 15px;
+        color: var(--tierra);
+        padding-bottom: 0;
+    }
+    .tabla-tarjetas tbody td.celda-sub {
+        order: -1;
+        justify-content: flex-start;
+        text-align: left;
+        padding-top: 0;
+        padding-bottom: 8px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid rgba(27, 67, 50, 0.08);
+    }
+    .tabla-tarjetas tbody td[colspan] {
+        justify-content: center;
+        text-align: center;
+    }
+    .tabla-tarjetas .ocultar-movil {
+        display: none !important;
+    }
+    .tabla-tarjetas input.form-control {
+        min-height: 40px;
+        font-size: 16px;
+        max-width: 130px;
+    }
+    /* Predicciones: con el departamento completo serían ~100 tarjetas
+       (14 productos x 7 días). En el celular primero se elige el producto
+       (o se escanea) y entonces aparecen sus 7 días. */
+    .tabla-predicciones.sin-producto tbody tr[data-producto] {
+        display: none !important;
+    }
+    .aviso-solo-movil {
+        display: block !important;
+    }
+}
+
+/* Tablas administrativas (Historial, Usuarios, Configuración,
+   Mantenimiento): siguen siendo tabla, pero van envueltas en
+   .table-responsive (Bootstrap) para deslizarse de lado dentro de su
+   recuadro sin desbordar la página. No necesitan reglas propias. */
+
+/* KPIs del dashboard y otros ajustes finos para 6". */
+@media (max-width: 575.98px) {
+    .kpi-valor {
+        font-size: 21px;
+        white-space: nowrap;
+    }
+    .kpi-icono {
+        display: none;
+    }
+    .alerta-fila {
+        flex-wrap: wrap;
+    }
+    .alerta-fila .alerta-meta {
+        flex-basis: 100%;
+        padding-left: 26px;
+    }
+    .buscador-producto-movil {
+        width: 100%;
+    }
+    .buscador-producto-movil input {
+        flex: 1 1 0;
+        width: auto !important;
+        min-width: 0;
+        font-size: 16px;
+    }
+    .pagination .page-link {
+        padding: 8px 12px;
+    }
+}
+.aviso-solo-movil {
+    display: none;
+}

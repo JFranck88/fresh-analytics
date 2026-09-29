@@ -14,13 +14,13 @@
     </div>
 {% endif %}
 
-<div class="card">
+<div class="card card-tabla-movil">
     <div class="card-body p-0">
-        <table class="table table-striped mb-0">
+        <table class="table table-striped mb-0 tabla-tarjetas">
             <thead><tr><th>Fecha</th><th>UPC</th><th>Producto</th><th>Cantidad</th><th>Motivo</th><th>Costo pérdida</th></tr></thead>
             <tbody>
                 {% for merma in mermas %}
-                <tr><td>{{ merma.fecha }}</td><td class="text-muted small">{{ merma.producto.codigo_upc|default:"—" }}</td><td>{{ merma.producto.nombre }}</td><td>{% if merma.producto.unidad_medida == "PESO" %}{{ merma.cantidad|floatformat:2 }} kg{% else %}{{ merma.cantidad|floatformat:0 }} u.{% endif %}</td><td>{{ merma.get_motivo_display }}</td><td>Q {{ merma.costo_perdida }}</td></tr>
+                <tr><td data-label="Fecha">{{ merma.fecha }}</td><td class="text-muted small celda-sub">{{ merma.producto.codigo_upc|default:"—" }}</td><td class="celda-titulo">{{ merma.producto.nombre }}</td><td data-label="Cantidad">{% if merma.producto.unidad_medida == "PESO" %}{{ merma.cantidad|floatformat:2 }} kg{% else %}{{ merma.cantidad|floatformat:0 }} u.{% endif %}</td><td data-label="Motivo">{{ merma.get_motivo_display }}</td><td data-label="Costo pérdida">Q {{ merma.costo_perdida }}</td></tr>
                 {% empty %}
                 <tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>{% if producto_filtro %}Sin mermas registradas para {{ producto_filtro.nombre }}.{% else %}Sin mermas registradas todavía.{% endif %}</td></tr>
                 {% endfor %}
@@ -30,7 +30,7 @@
 </div>
 
 {% if mermas.paginator.num_pages > 1 %}
-<div class="d-flex justify-content-between align-items-center mt-3">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
     <span class="text-muted small">Mostrando {{ mermas.start_index }}–{{ mermas.end_index }} de {{ mermas.paginator.count }} registros</span>
     <nav aria-label="Paginación de mermas">
         <ul class="pagination pagination-sm mb-0">

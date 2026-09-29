@@ -3,6 +3,11 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    {# Sin esta línea, un celular o handheld dibuja la página como si fuera #}
+    {# una pantalla de escritorio de 980 px y la encoge: el login se veía #}
+    {# diminuto en 6". base.html ya la tenía; el login es independiente. #}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1B4332">
     <title>Fresh Analytics - Iniciar sesión</title>
     <link rel="icon" type="image/svg+xml" href="{% static 'core/img/logo.svg' %}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">

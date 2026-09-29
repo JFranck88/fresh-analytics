@@ -19,7 +19,7 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <h6 class="mb-0" id="titulo-grafica-prediccion">Tendencia de predicción del Departamento Alimentos Frescos</h6>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 buscador-producto-movil">
                 <input type="text" id="buscar-upc-prediccion" class="form-control form-control-sm" style="width: 120px;" placeholder="UPC" inputmode="numeric" autocomplete="off">
                 <input type="text" id="buscar-desc-prediccion" class="form-control form-control-sm" style="width: 180px;" placeholder="Descripción" autocomplete="off">
             </div>
@@ -30,7 +30,7 @@
             <a href="#" id="volver-departamento" class="small ms-2 d-none">· Ver Departamento Alimentos Frescos</a>
         </p>
         <canvas id="grafica-prediccion" height="90"></canvas>
-        <p class="text-muted small mt-2 mb-0">Haz clic en un punto de la gráfica para ver el detalle de ese día.</p>
+        <p class="text-muted small mt-2 mb-0"><span class="d-none d-md-inline">Haz clic</span><span class="d-md-none">Toca</span> en un punto de la gráfica para ver el detalle de ese día.</p>
         <div id="detalle-dia-prediccion" class="alert alert-light border d-none mt-2 mb-0 py-2"></div>
     </div>
 </div>
@@ -181,6 +181,17 @@
             : 'Unidades de venta esperadas';
     }
 
+    function esPantallaMovil() {
+        return window.matchMedia('(max-width: 767.98px)').matches;
+    }
+
+    // En el celular, la tabla de abajo solo muestra filas cuando hay un
+    // producto elegido (ver .tabla-predicciones.sin-producto en estilo2.css).
+    function marcarTablaSinProducto(sinProducto) {
+        const tabla = document.querySelector('.tabla-predicciones');
+        if (tabla) tabla.classList.toggle('sin-producto', sinProducto);
+    }
+
     let chartTendencia;
     function dibujar(pid) {
         // pid === null => vista de departamento completo (requerimiento
@@ -226,11 +237,15 @@
             },
             options: {
                 responsive: true,
+                // En PC se respeta la proporción del <canvas> (ancha y baja);
+                // en una pantalla de 6" esa proporción dejaba la gráfica de
+                // unos 90 px de alto, ilegible. Ahí se usa una más cuadrada.
+                ...(esPantallaMovil() ? { aspectRatio: 1.15 } : {}),
                 plugins: { legend: { display: true, position: 'bottom' } },
                 scales: {
                     y: {
                         beginAtZero: true,
-                        title: { display: true, text: etiquetaEjeY(pid) },
+                        title: { display: !esPantallaMovil(), text: etiquetaEjeY(pid) },
                     }
                 },
                 onClick: function (evt, elementos) {
@@ -243,6 +258,7 @@
     }
 
     function filtrarTabla(pid) {
+        marcarTablaSinProducto(false);
         document.querySelectorAll('tbody tr[data-producto]').forEach(fila => {
             fila.style.display = (fila.dataset.producto === pid) ? '' : 'none';
         });
@@ -253,6 +269,7 @@
     // filtraba en silencio al primer producto alfabético, sin ningún
     // criterio de negocio.
     function mostrarTodaLaTabla() {
+        marcarTablaSinProducto(true);
         document.querySelectorAll('tbody tr[data-producto]').forEach(fila => {
             fila.style.display = '';
         });
@@ -283,13 +300,14 @@
     });
 </script>
 
-<div class="card mb-4">
+<p class="aviso-solo-movil text-muted small mb-2"><i class="bi bi-upc-scan me-1"></i>Busca o escanea un producto arriba para ver su pronóstico día por día.</p>
+<div class="card card-tabla-movil mb-4">
     <div class="card-body p-0">
-        <table class="table table-striped mb-0">
+        <table class="table table-striped mb-0 tabla-tarjetas tabla-predicciones">
             <thead><tr><th>UPC</th><th>Producto</th><th>Fecha</th><th>Venta Estimada</th><th>Rango esperado</th><th>Margen de error</th></tr></thead>
             <tbody>
                 {% for p in predicciones %}
-                <tr data-producto="{{ p.producto.id_producto }}"><td class="text-muted small">{{ p.producto.codigo_upc|default:"—" }}</td><td>{{ p.producto.nombre }}</td><td>{{ p.fecha_pronosticada }}</td>{% if p.producto.unidad_medida == "PESO" %}<td><strong>{{ p.valor_predicho|floatformat:2 }} kg</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:2 }} - {{ p.intervalo_superior|floatformat:2 }} kg</td>{% else %}<td><strong>{{ p.valor_predicho|floatformat:0 }} u.</strong></td><td class="text-muted">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }} u.</td>{% endif %}<td>{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
+                <tr data-producto="{{ p.producto.id_producto }}"><td class="text-muted small ocultar-movil">{{ p.producto.codigo_upc|default:"—" }}</td><td class="ocultar-movil">{{ p.producto.nombre }}</td><td class="celda-titulo">{{ p.fecha_pronosticada }}</td>{% if p.producto.unidad_medida == "PESO" %}<td data-label="Venta estimada"><strong>{{ p.valor_predicho|floatformat:2 }} kg</strong></td><td class="text-muted" data-label="Rango esperado">{{ p.intervalo_inferior|floatformat:2 }} - {{ p.intervalo_superior|floatformat:2 }} kg</td>{% else %}<td data-label="Venta estimada"><strong>{{ p.valor_predicho|floatformat:0 }} u.</strong></td><td class="text-muted" data-label="Rango esperado">{{ p.intervalo_inferior|floatformat:0 }} - {{ p.intervalo_superior|floatformat:0 }} u.</td>{% endif %}<td data-label="Margen de error">{% if p.precision_modelo %}{{ p.precision_modelo }}%{% else %}N/D{% endif %}</td></tr>
                 {% empty %}
                 <tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-graph-up me-2"></i>Todavía no hay predicciones generadas.</td></tr>
                 {% endfor %}

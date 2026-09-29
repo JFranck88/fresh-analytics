@@ -37,6 +37,7 @@
 <h6 class="mb-2">Volumen de datos</h6>
 <div class="card mb-4">
     <div class="card-body p-0">
+        <div class="table-responsive">
         <table class="table table-sm mb-0">
             <tbody>
                 <tr><td>Productos activos</td><td><strong>{{ total_productos }}</strong></td></tr>
@@ -44,6 +45,7 @@
                 <tr><td>Predicciones almacenadas</td><td><strong>{{ total_predicciones }}</strong></td></tr>
             </tbody>
         </table>
+        </div>
     </div>
 </div>
 
@@ -52,6 +54,7 @@
 <div class="card mb-4">
     <div class="card-body {% if productos_con_mape_alto %}p-0{% endif %}">
         {% if productos_con_mape_alto %}
+            <div class="table-responsive">
             <table class="table table-sm mb-0">
                 <thead><tr><th>UPC</th><th>Producto</th><th>MAPE</th></tr></thead>
                 <tbody>
@@ -60,6 +63,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="text-success mb-0">Ningún producto supera el umbral - todos los modelos están dentro de la meta.</p>
         {% endif %}

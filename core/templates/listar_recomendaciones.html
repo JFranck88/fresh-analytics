@@ -18,25 +18,25 @@
 
 <form method="post">
     {% csrf_token %}
-    <div class="card">
+    <div class="card card-tabla-movil">
         <div class="card-body p-0">
-            <table class="table table-striped mb-0">
+            <table class="table table-striped mb-0 tabla-tarjetas">
                 <thead><tr><th>UPC</th><th>Producto</th><th>Predicción 7 días</th><th>Stock actual</th><th>Sugerido</th><th>Ajustar</th></tr></thead>
                 <tbody>
                     {% for r in recomendaciones %}
                     <tr>
-                        <td class="text-muted small">{{ r.producto_upc|default:"—" }}</td>
-                        <td>{{ r.producto }}</td>
+                        <td class="text-muted small celda-sub">{{ r.producto_upc|default:"—" }}</td>
+                        <td class="celda-titulo">{{ r.producto }}</td>
                         {% if r.unidad_medida == "PESO" %}
-                        <td>{{ r.prediccion_semana|floatformat:2 }} kg</td>
-                        <td>{{ r.stock_actual|floatformat:2 }} kg</td>
-                        <td><strong>{{ r.sugerido|floatformat:2 }} kg</strong></td>
-                        <td><input type="number" step="0.01" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 100px" value="{{ r.sugerido }}"></td>
+                        <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:2 }} kg</td>
+                        <td data-label="Stock actual">{{ r.stock_actual|floatformat:2 }} kg</td>
+                        <td data-label="Sugerido"><strong>{{ r.sugerido|floatformat:2 }} kg</strong></td>
+                        <td data-label="Ajustar (kg)"><input inputmode="decimal" type="number" step="0.01" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 100px" value="{{ r.sugerido }}"></td>
                         {% else %}
-                        <td>{{ r.prediccion_semana|floatformat:0 }} u.</td>
-                        <td>{{ r.stock_actual|floatformat:0 }} u.</td>
-                        <td><strong>{{ r.sugerido|floatformat:0 }} u.</strong></td>
-                        <td><input type="number" step="1" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 90px" value="{{ r.sugerido }}"></td>
+                        <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:0 }} u.</td>
+                        <td data-label="Stock actual">{{ r.stock_actual|floatformat:0 }} u.</td>
+                        <td data-label="Sugerido"><strong>{{ r.sugerido|floatformat:0 }} u.</strong></td>
+                        <td data-label="Ajustar (u.)"><input inputmode="numeric" type="number" step="1" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 90px" value="{{ r.sugerido }}"></td>
                         {% endif %}
                     </tr>
                     {% empty %}

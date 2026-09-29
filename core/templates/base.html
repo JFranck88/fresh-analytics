@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1B4332">
     <title>Fresh Analytics{% block titulo %}{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{% static 'core/img/logo.svg' %}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -80,12 +81,12 @@
             <button type="button" class="topbar-toggle d-lg-none" id="btnAbrirSidebar" aria-label="Abrir menú">
                 <i class="bi bi-list"></i>
             </button>
-            <form method="get" action="{% url 'buscar_global' %}" class="topbar-buscador d-none d-md-flex" id="formBuscadorTopbar">
+            <form method="get" action="{% url 'buscar_global' %}" class="topbar-buscador d-flex" id="formBuscadorTopbar">
                 <i class="bi bi-search"></i>
-                <input type="search" name="q" id="inputBuscadorTopbar" placeholder="Buscar producto, lote, alerta…" value="{{ request.GET.q }}" autocomplete="off">
+                <input type="search" name="q" id="inputBuscadorTopbar" placeholder="Buscar producto, lote, alerta…" value="{{ request.GET.q }}" autocomplete="off" enterkeyhint="search">
                 <div id="resultadosBuscadorTopbar" class="topbar-buscador-resultados"></div>
             </form>
-            <div class="flex-grow-1"></div>
+            <div class="flex-grow-1 topbar-espaciador"></div>
             <div class="dropdown">
                 <button class="topbar-usuario dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                     <span class="topbar-usuario-avatar">{{ user.nombre|slice:":1"|upper }}</span>
