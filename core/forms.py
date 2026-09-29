@@ -60,8 +60,6 @@ class MermaForm(forms.ModelForm):
             )
         return cantidad
 
-from .models import Usuario
-
 
 class CrearUsuarioForm(forms.ModelForm):
     password1 = forms.CharField(
@@ -103,8 +101,6 @@ class CrearUsuarioForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["rol"].choices = [("", "Selecciona un rol")] + list(Usuario.Rol.choices)
-
-        from .models import Configuracion
 
 
 class EditarUsuarioForm(forms.ModelForm):

@@ -16,6 +16,26 @@ CSRF_TRUSTED_ORIGINS = config(
     default="https://fresh-analytics.onrender.com"
 ).split(",")
 
+# Endurecimiento de seguridad en producción (revisión de código 2026-09-29).
+# Render define la variable RENDER=true en todos sus servicios, así que
+# esto solo se activa allá: en la máquina local (runserver por http) y en
+# las pruebas automáticas no aplica, y nada de eso se rompe.
+EN_RENDER = config("RENDER", default=False, cast=bool)
+if EN_RENDER:
+    # Render termina el HTTPS en su proxy y le pasa la petición a Django
+    # por http, avisando con este encabezado. Sin esta línea, Django creería
+    # que TODA petición es http y SECURE_SSL_REDIRECT haría un ciclo
+    # infinito de redirecciones.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = True
+    # Las cookies de sesión y CSRF solo viajan por conexión cifrada: nadie
+    # puede robar la sesión escuchando una conexión http.
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    # HSTS: le indica al navegador que este sitio SOLO se abre por https
+    # durante un año, aunque alguien escriba http:// a mano.
+    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 365
+
 
 
 INSTALLED_APPS = [

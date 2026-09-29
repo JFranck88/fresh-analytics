@@ -4,8 +4,8 @@ from datetime import timedelta
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Sum, F, Q, Avg, DecimalField
-from django.db.models.functions import TruncDate
+from django.db.models import Sum, F, Q, Avg, Max, DecimalField
+from django.db.models.functions import Coalesce, TruncDate
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
@@ -1354,9 +1354,13 @@ def mantenimiento(request):
     ).values_list("fecha_prediccion", flat=True).first()
     dias_desde_prediccion = (hoy - fecha_prediccion_max).days if fecha_prediccion_max else None
 
-    fecha_alerta_max = Alerta.objects.order_by(
-        "-fecha_generacion"
-    ).values_list("fecha_generacion", flat=True).first()
+    # Las alertas vigentes ya no se recrean cada día (ver generar_alertas.py),
+    # así que fecha_generacion quedó como "desde cuándo existe" - la última
+    # corrida del comando la marca fecha_actualizacion. Coalesce cubre las
+    # alertas anteriores a la migración 0009, que no la tienen.
+    fecha_alerta_max = Alerta.objects.aggregate(
+        ultima=Max(Coalesce("fecha_actualizacion", "fecha_generacion"))
+    )["ultima"]
 
     productos_con_mape_alto = (
         Prediccion.objects.filter(fecha_prediccion=fecha_prediccion_max, precision_modelo__gt=25)

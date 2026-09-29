@@ -1,20 +1,26 @@
-import json
-
 import pandas as pd
 from django.core.management.base import BaseCommand
-from django.utils import timezone
 from prophet.diagnostics import cross_validation
 
-from core.models import Producto, Configuracion
+from core.models import Producto
 from core.management.commands.entrenar_modelo import obtener_serie_diaria, construir_modelo
 
 
 class Command(BaseCommand):
     help = (
-        "Audita los modelos con validación cruzada temporal y guarda el "
-        "resultado en Configuracion (clave 'validacion_cruzada_resultado') "
-        "para que el dashboard lo muestre en una gráfica interactiva."
+        "Herramienta interna de auditoría: valida el modelo con validación "
+        "cruzada temporal de Prophet (varios cortes históricos, horizonte de "
+        "7 días) e imprime el MAPE por producto y por día de anticipación. "
+        "Se corre a mano cuando se quiere evidencia de precisión; no forma "
+        "parte del pipeline diario ni se muestra en pantalla."
     )
+
+    # Historia: antes guardaba el resultado como JSON en Configuracion
+    # (clave "validacion_cruzada_resultado") para una gráfica de
+    # Predicciones que se retiró el 2026-09-16 por no aportarle al usuario.
+    # Guardarlo ahí dejaba un "parámetro" basura visible en la pantalla de
+    # Configuración, así que ahora solo imprime el reporte en consola (la
+    # migración 0010 limpia ese registro si quedó en la base).
 
     def add_arguments(self, parser):
         parser.add_argument("--producto", type=str, default=None)
@@ -55,23 +61,11 @@ class Command(BaseCommand):
         combinado = pd.concat(todos_los_resultados).dropna(subset=["error_pct"])
         promedio_por_dia = combinado.groupby("dia_anticipacion")["error_pct"].mean().sort_index()
 
-        resultado = {
-            "dias": [int(d) for d in promedio_por_dia.index],
-            "mape": [round(float(v), 1) for v in promedio_por_dia.values],
-            "productos": len(resumen_por_producto),
-            "fecha": timezone.localdate().isoformat(),
-        }
-
-        Configuracion.objects.update_or_create(
-            clave="validacion_cruzada_resultado",
-            defaults={
-                "valor": json.dumps(resultado, separators=(",", ":")),
-                "descripcion": "Resultado de la última validación cruzada del modelo (JSON, uso interno).",
-            },
-        )
-
         self.stdout.write(self.style.SUCCESS(
-            f"\nGuardado en Configuracion. {len(resumen_por_producto)} producto(s) validados."
+            f"\nMAPE promedio por día de anticipación ({len(resumen_por_producto)} producto(s)):"
         ))
+        for dia, mape in promedio_por_dia.items():
+            self.stdout.write(f"  Día {int(dia)}: {float(mape):.1f}%")
+        self.stdout.write("\nMAPE promedio por producto:")
         for nombre, mape in resumen_por_producto:
             self.stdout.write(f"  {nombre}: {mape}%")

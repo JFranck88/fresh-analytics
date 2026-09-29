@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
+from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -28,11 +29,13 @@ class Command(BaseCommand):
             "-fecha_prediccion"
         ).values_list("fecha_prediccion", flat=True).first()
 
-        # Regenerar las alertas de hoy - evita duplicados si el comando
-        # corre más de una vez en el mismo día.
-        Alerta.objects.all().delete()
-
-        nuevas = []
+        # Antes aquí se hacía Alerta.objects.all().delete() y se volvían a
+        # crear todas desde cero cada día: se perdía quién había leído cada
+        # alerta y cuándo, y una alerta ya revisada reaparecía como "nueva"
+        # al día siguiente aunque fuera la misma situación. Ahora primero se
+        # calcula qué alertas aplican hoy (`vigentes`) y al final se
+        # concilian contra las que ya existen (ver _conciliar).
+        vigentes = []
         for producto in Producto.objects.filter(activo=True):
             stock_actual = Inventario.objects.filter(
                 producto=producto, fecha_vencimiento__gte=hoy
@@ -57,8 +60,12 @@ class Command(BaseCommand):
                     f"{cantidad_riesgo:.2f} kg" if producto.unidad_medida == Producto.UnidadMedida.PESO
                     else f"{cantidad_riesgo:.0f} unidades"
                 )
-                nuevas.append(Alerta(
+                vigentes.append(Alerta(
                     producto=producto, tipo=Alerta.Tipo.VENCIMIENTO,
+                    # Si entra otro lote a la ventana de vencimiento, es un
+                    # evento distinto y debe volver a avisarse aunque la
+                    # alerta anterior ya se hubiera leído.
+                    referencia=proxima.fecha_vencimiento.isoformat(),
                     mensaje=(
                         f"{texto_cantidad} vencen en {dias_restantes} día(s)."
                     ),
@@ -82,7 +89,7 @@ class Command(BaseCommand):
 
                 # P-07B: Verificar stock bajo
                 if stock_actual < prediccion_cobertura:
-                    nuevas.append(Alerta(
+                    vigentes.append(Alerta(
                         producto=producto, tipo=Alerta.Tipo.STOCK_BAJO,
                         mensaje=(
                             f"Stock actual ({fmt_cantidad(stock_actual)}) no cubre la "
@@ -94,7 +101,7 @@ class Command(BaseCommand):
                 # P-07C: Verificar excedente
                 limite_excedente = prediccion_semana * (1 + porcentaje_excedente)
                 if prediccion_semana > 0 and stock_actual > limite_excedente:
-                    nuevas.append(Alerta(
+                    vigentes.append(Alerta(
                         producto=producto, tipo=Alerta.Tipo.EXCEDENTE,
                         mensaje=(
                             f"Stock actual ({fmt_cantidad(stock_actual)}) supera en más "
@@ -104,5 +111,54 @@ class Command(BaseCommand):
                     ))
 
         # P-07D + P-07E: Consolidar y almacenar
+        creadas, mantenidas, resueltas = _conciliar(vigentes)
+        self.stdout.write(self.style.SUCCESS(
+            f"{len(vigentes)} alertas vigentes (P-07): {creadas} nuevas, "
+            f"{mantenidas} se mantienen, {resueltas} resueltas y retiradas."
+        ))
+
+
+def _clave(alerta):
+    return (alerta.producto_id, alerta.tipo, alerta.referencia)
+
+
+def _conciliar(vigentes):
+    """Concilia las alertas que aplican hoy contra las ya guardadas:
+    - Si la misma alerta (producto + tipo + referencia) ya existe, se
+      conserva tal cual - incluido si ya fue leída, por quién y cuándo -
+      y solo se actualiza su mensaje (las cantidades cambian cada día).
+    - Si es nueva, se crea sin leer.
+    - Si una alerta guardada ya no aplica (se resolvió), se retira.
+    Correr el comando dos veces el mismo día no duplica nada."""
+    ahora = timezone.now()
+    existentes = {}
+    sobrantes = []
+    for alerta in Alerta.objects.order_by("id_alerta"):
+        if _clave(alerta) in existentes:
+            sobrantes.append(alerta.pk)  # duplicado heredado: se limpia
+        else:
+            existentes[_clave(alerta)] = alerta
+
+    nuevas, actualizadas, claves_vigentes = [], [], set()
+    for alerta in vigentes:
+        clave = _clave(alerta)
+        if clave in claves_vigentes:
+            continue
+        claves_vigentes.add(clave)
+        guardada = existentes.get(clave)
+        if guardada:
+            guardada.mensaje = alerta.mensaje
+            guardada.fecha_actualizacion = ahora
+            actualizadas.append(guardada)
+        else:
+            alerta.fecha_actualizacion = ahora
+            nuevas.append(alerta)
+
+    resueltas = [a.pk for clave, a in existentes.items() if clave not in claves_vigentes]
+
+    with transaction.atomic():
+        Alerta.objects.filter(pk__in=resueltas + sobrantes).delete()
+        Alerta.objects.bulk_update(actualizadas, ["mensaje", "fecha_actualizacion"])
         Alerta.objects.bulk_create(nuevas)
-        self.stdout.write(self.style.SUCCESS(f"{len(nuevas)} alertas generadas (P-07)."))
+
+    return len(nuevas), len(actualizadas), len(resueltas)

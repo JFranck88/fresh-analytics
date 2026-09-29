@@ -278,6 +278,16 @@ class Alerta(models.Model):
         Usuario, on_delete=models.SET_NULL, null=True, blank=True,
         db_column="id_usuario_lector", related_name="alertas_leidas",
     )
+    # Identifica el evento concreto dentro de un mismo producto + tipo, para
+    # que generar_alertas pueda reconocer "esta es la misma alerta de ayer"
+    # y conservar quién la leyó y cuándo (antes se borraban todas cada día).
+    # VENCIMIENTO: fecha del lote más próximo a vencer (si llega otro lote a
+    # la ventana de vencimiento, es un evento nuevo y vuelve a avisar).
+    # STOCK_BAJO / EXCEDENTE: vacío - la condición misma es el evento.
+    referencia = models.CharField(max_length=20, blank=True, default="")
+    # Última corrida de generar_alertas que confirmó que la alerta sigue
+    # vigente (fecha_generacion, en cambio, queda como "desde cuándo").
+    fecha_actualizacion = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "alerta"

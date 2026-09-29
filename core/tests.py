@@ -322,6 +322,107 @@ class AlertaFechaLecturaTests(TestCase):
         self.assertIsNone(self.alerta.fecha_lectura)
 
 
+class GenerarAlertasConciliacionTests(TestCase):
+    """Regresión (2026-09-29): generar_alertas borraba TODAS las alertas
+    cada día y las recreaba, así que se perdía quién había leído cada una
+    y cuándo. Ahora concilia: conserva las vigentes, crea las nuevas y
+    retira solo las que ya se resolvieron."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("gerente@test.com", Usuario.Rol.GERENTE)
+        self.producto = crear_producto()
+        self.hoy = timezone.localdate()
+        # 20 de venta esperada hoy vs. 5 en stock -> STOCK_BAJO (y nada más:
+        # el lote vence en 5 días, fuera de la ventana de 3 de vencimiento).
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=self.hoy,
+            fecha_pronosticada=self.hoy, valor_predicho=20, intervalo_inferior=15,
+            intervalo_superior=25, precision_modelo=10.0,
+        )
+        self.lote = Inventario.objects.create(
+            producto=self.producto, fecha_ingreso=self.hoy,
+            fecha_vencimiento=self.hoy + timedelta(days=5), cantidad=5,
+        )
+
+    def generar(self):
+        call_command("generar_alertas", stdout=StringIO())
+
+    def marcar_leida(self, alerta):
+        self.client.force_login(self.gerente)
+        self.client.post(reverse("marcar_alerta_leida", args=[alerta.id_alerta]))
+        alerta.refresh_from_db()
+        return alerta
+
+    def test_alerta_leida_se_conserva_si_sigue_vigente(self):
+        self.generar()
+        alerta = self.marcar_leida(Alerta.objects.get(tipo=Alerta.Tipo.STOCK_BAJO))
+        fecha_lectura = alerta.fecha_lectura
+
+        self.generar()  # la corrida del día siguiente
+
+        alerta_despues = Alerta.objects.get(tipo=Alerta.Tipo.STOCK_BAJO)
+        self.assertEqual(alerta_despues.pk, alerta.pk)
+        self.assertTrue(alerta_despues.leida)
+        self.assertEqual(alerta_despues.usuario_lector, self.gerente)
+        self.assertEqual(alerta_despues.fecha_lectura, fecha_lectura)
+
+    def test_correr_dos_veces_no_duplica(self):
+        self.generar()
+        self.generar()
+        self.assertEqual(Alerta.objects.count(), 1)
+
+    def test_mensaje_se_actualiza_sin_perder_la_lectura(self):
+        self.generar()
+        alerta = self.marcar_leida(Alerta.objects.get(tipo=Alerta.Tipo.STOCK_BAJO))
+        self.lote.cantidad = 8
+        self.lote.save()
+
+        self.generar()
+
+        alerta.refresh_from_db()
+        self.assertIn("8 unidades", alerta.mensaje)
+        self.assertTrue(alerta.leida)
+
+    def test_alerta_resuelta_se_retira(self):
+        self.generar()
+        self.assertTrue(Alerta.objects.filter(tipo=Alerta.Tipo.STOCK_BAJO).exists())
+        self.lote.cantidad = 20  # ya cubre la venta esperada
+        self.lote.save()
+
+        self.generar()
+
+        self.assertFalse(Alerta.objects.filter(tipo=Alerta.Tipo.STOCK_BAJO).exists())
+
+    def test_nuevo_lote_por_vencer_vuelve_a_avisar_aunque_la_anterior_se_leyera(self):
+        lote_viejo = Inventario.objects.create(
+            producto=self.producto, fecha_ingreso=self.hoy,
+            fecha_vencimiento=self.hoy + timedelta(days=1), cantidad=3,
+        )
+        self.generar()
+        vieja = self.marcar_leida(Alerta.objects.get(tipo=Alerta.Tipo.VENCIMIENTO))
+
+        # Ese lote ya salió y ahora es OTRO lote el que entra a la ventana
+        # de vencimiento: es un evento distinto, debe avisarse de nuevo.
+        lote_viejo.delete()
+        Inventario.objects.create(
+            producto=self.producto, fecha_ingreso=self.hoy,
+            fecha_vencimiento=self.hoy + timedelta(days=2), cantidad=4,
+        )
+        self.generar()
+
+        nueva = Alerta.objects.get(tipo=Alerta.Tipo.VENCIMIENTO)
+        self.assertNotEqual(nueva.pk, vieja.pk)
+        self.assertFalse(nueva.leida)
+
+    def test_mantenimiento_muestra_la_ultima_corrida(self):
+        self.generar()
+        alerta = Alerta.objects.get(tipo=Alerta.Tipo.STOCK_BAJO)
+        admin = crear_usuario("admin@test.com", Usuario.Rol.ADMINISTRADOR)
+        self.client.force_login(admin)
+        respuesta = self.client.get(reverse("mantenimiento"))
+        self.assertEqual(respuesta.context["fecha_alerta_max"], alerta.fecha_actualizacion)
+
+
 class ConfiguracionEdicionTests(TestCase):
     """Regresión del fix de esta sesión: editar un parámetro existente
     debe actualizarlo, no fallar por la validación de clave única."""
@@ -2160,3 +2261,89 @@ class ActualizarHistorialVentasUnidadMedidaTests(TestCase):
         )
         self.assertTrue(cantidades)
         self.assertTrue(all(c == int(c) for c in cantidades))
+
+
+class SeguridadProduccionTests(TestCase):
+    """Revisión de código 2026-09-29: en producción (Render define
+    RENDER=true) Django debe forzar https, marcar las cookies de sesión y
+    CSRF como seguras y enviar HSTS. Fuera de Render (máquina local,
+    pruebas) nada de eso se activa, para no romper runserver por http."""
+
+    def cargar_settings(self, entorno):
+        import importlib
+        import os
+        from fresh_analytics_project import settings as modulo_settings
+
+        nombres = (
+            "SECURE_SSL_REDIRECT", "SESSION_COOKIE_SECURE",
+            "CSRF_COOKIE_SECURE", "SECURE_HSTS_SECONDS",
+            "SECURE_PROXY_SSL_HEADER",
+        )
+
+        def recargar():
+            # reload() reejecuta el módulo sobre el MISMO espacio de nombres:
+            # un valor puesto en una recarga anterior sobreviviría si no se
+            # borra antes.
+            for nombre in nombres:
+                if hasattr(modulo_settings, nombre):
+                    delattr(modulo_settings, nombre)
+            return importlib.reload(modulo_settings)
+
+        with patch.dict(os.environ, entorno):
+            if "RENDER" not in entorno:
+                os.environ.pop("RENDER", None)
+            recargado = recargar()
+            valores = {nombre: getattr(recargado, nombre, None) for nombre in nombres}
+        recargar()  # deja el módulo como estaba
+        return valores
+
+    def test_en_render_se_activa_todo_el_endurecimiento(self):
+        valores = self.cargar_settings({"RENDER": "true"})
+        self.assertTrue(valores["SECURE_SSL_REDIRECT"])
+        self.assertTrue(valores["SESSION_COOKIE_SECURE"])
+        self.assertTrue(valores["CSRF_COOKIE_SECURE"])
+        self.assertGreaterEqual(valores["SECURE_HSTS_SECONDS"], 60 * 60 * 24 * 365)
+        # Sin esto, detrás del proxy de Render habría un ciclo infinito de
+        # redirecciones a https.
+        self.assertEqual(valores["SECURE_PROXY_SSL_HEADER"], ("HTTP_X_FORWARDED_PROTO", "https"))
+
+    def test_fuera_de_render_no_se_fuerza_https(self):
+        valores = self.cargar_settings({})
+        self.assertFalse(valores["SECURE_SSL_REDIRECT"])
+        self.assertFalse(valores["SESSION_COOKIE_SECURE"])
+
+
+class CrearAdminProduccionTests(TestCase):
+    """Revisión de código 2026-09-29: sin ADMIN_PASSWORD_INICIAL ya no se
+    crea un superusuario con la contraseña por defecto "cambiar-esto-ya".
+    Y como el comando corre en cada despliegue de Render, nunca debe
+    terminar con error (si no, el sitio no arrancaría)."""
+
+    CORREO = "admin@freshanalytics.com"
+
+    def correr(self, entorno):
+        import os
+        salida = StringIO()
+        with patch.dict(os.environ, entorno):
+            if "ADMIN_PASSWORD_INICIAL" not in entorno:
+                os.environ.pop("ADMIN_PASSWORD_INICIAL", None)
+            call_command("crear_admin_produccion", stdout=salida)
+        return salida.getvalue()
+
+    def test_sin_variable_no_crea_admin_ni_falla(self):
+        salida = self.correr({})
+        self.assertFalse(Usuario.objects.filter(correo=self.CORREO).exists())
+        self.assertIn("ADMIN_PASSWORD_INICIAL no está definida", salida)
+
+    def test_con_variable_crea_admin_con_esa_contrasena(self):
+        self.correr({"ADMIN_PASSWORD_INICIAL": "Otra-Clave-Segura-456"})
+        admin = Usuario.objects.get(correo=self.CORREO)
+        self.assertTrue(admin.check_password("Otra-Clave-Segura-456"))
+        self.assertFalse(admin.check_password("cambiar-esto-ya"))
+        self.assertTrue(admin.is_superuser_admin)
+
+    def test_si_ya_existe_no_lo_toca(self):
+        existente = crear_usuario(self.CORREO, Usuario.Rol.ADMINISTRADOR, password="Clave-Original-789")
+        self.correr({"ADMIN_PASSWORD_INICIAL": "Otra-Clave-Segura-456"})
+        existente.refresh_from_db()
+        self.assertTrue(existente.check_password("Clave-Original-789"))
