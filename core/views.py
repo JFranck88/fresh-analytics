@@ -10,6 +10,7 @@ from django.http import FileResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.templatetags.static import static
 from django.urls import reverse
+from django.utils.http import urlencode
 from django.views.decorators.cache import cache_control
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -821,10 +822,23 @@ def registrar_merma(request):
             merma.costo_perdida = round(float(merma.producto.precio_compra) * merma.cantidad, 2)
             merma.save()
             messages.success(request, "Merma registrada correctamente.")
+            # Si se llegó desde el Modo pasillo, se regresa a la ficha del
+            # mismo producto para seguir recorriendo el pasillo.
+            if request.GET.get("volver") == "pasillo" and merma.producto.codigo_upc:
+                return redirect(_url_pasillo(merma.producto.codigo_upc))
             return redirect("dashboard")
     else:
-        form = MermaForm(initial={"fecha": timezone.localdate()})
-    return render(request, "registrar_merma.html", {"form": form})
+        inicial = {"fecha": timezone.localdate()}
+        # ?producto=<id> (botón "Registrar merma" del Modo pasillo): el
+        # producto llega ya elegido, solo falta cantidad y motivo.
+        producto_id = request.GET.get("producto", "")
+        if producto_id.isdigit() and Producto.objects.filter(id_producto=producto_id, activo=True).exists():
+            inicial["producto"] = int(producto_id)
+        form = MermaForm(initial=inicial)
+    return render(request, "registrar_merma.html", {
+        "form": form,
+        "volver_pasillo": request.GET.get("volver") == "pasillo",
+    })
 
 
 @rol_requerido("GERENTE", "COMPRADOR")
@@ -1442,3 +1456,178 @@ def sin_conexion(request):
     service worker la guarda de antemano). FAs necesita internet para sus
     datos; esto solo evita la página de error genérica del navegador."""
     return render(request, "pwa/sin_conexion.html")
+
+
+# ---------------------------------------------------------------------------
+# Modo pasillo - semana 3 del plan de la fase final (2026-10-13)
+#
+# Pensado para la handheld Generalscan T60: el encargado recorre el pasillo
+# (observación de campo 4.1.10: hoy lo hace sin ningún dispositivo y decide
+# de memoria), escanea el producto en el anaquel y ve en una sola ficha todo
+# lo que FAs sabe de él. Probado en el equipo real: el lector de la T60
+# "escribe" el código en la casilla que tenga el cursor y manda Enter al
+# final (emulación de teclado de Generalscan Keyboard Pro), así que basta
+# con un formulario GET normal - no hace falta ninguna app nativa.
+# ---------------------------------------------------------------------------
+
+def variantes_codigo(codigo):
+    """Un mismo código de barras puede llegar escrito de dos formas: el
+    UPC-A de 12 dígitos y su versión EAN-13 (un 0 adelante) son el mismo
+    producto, y cada lector o base de datos guarda uno u otro. Se prueban
+    las dos para no decir "no registrado" por un cero de diferencia."""
+    variantes = [codigo]
+    if codigo.isdigit():
+        if len(codigo) == 13 and codigo.startswith("0"):
+            variantes.append(codigo[1:])
+        elif len(codigo) == 12:
+            variantes.append("0" + codigo)
+    return variantes
+
+
+def buscar_producto_por_codigo(codigo):
+    return (
+        Producto.objects.filter(activo=True, codigo_upc__in=variantes_codigo(codigo))
+        .order_by("id_producto")
+        .first()
+    )
+
+
+def limpiar_codigo(texto):
+    """El lector a veces agrega espacios o saltos de línea; además se limita
+    al largo máximo del campo codigo_upc."""
+    return "".join((texto or "").split())[:64]
+
+
+def ficha_pasillo(producto, hoy):
+    """Todo lo que FAs sabe de un producto, en un solo diccionario para la
+    ficha del Modo pasillo. Reutiliza los mismos cálculos de las demás
+    pantallas (Recomendaciones, Riesgo climático, Alertas), así que la
+    ficha nunca contradice lo que muestra el resto del sistema."""
+    fecha_max = Prediccion.objects.order_by("-fecha_prediccion").values_list(
+        "fecha_prediccion", flat=True
+    ).first()
+
+    stock_actual = Inventario.objects.filter(
+        producto=producto, fecha_vencimiento__gte=hoy
+    ).aggregate(total=Sum("cantidad"))["total"] or 0
+    lotes_vigentes = Inventario.objects.filter(
+        producto=producto, fecha_vencimiento__gte=hoy, cantidad__gt=0
+    ).order_by("fecha_vencimiento", "fecha_ingreso")
+    lote_proximo = lotes_vigentes.first()
+    dias_alerta_vencimiento = int(obtener_parametro("dias_alerta_vencimiento", 3))
+
+    proximo_vencimiento = None
+    if lote_proximo:
+        dias_restantes = (lote_proximo.fecha_vencimiento - hoy).days
+        proximo_vencimiento = {
+            "fecha": lote_proximo.fecha_vencimiento,
+            "dia_semana": DIAS_SEMANA_ES[lote_proximo.fecha_vencimiento.weekday()],
+            "dias_restantes": dias_restantes,
+            "cantidad": lote_proximo.cantidad,
+            "lote": lote_proximo.lote,
+            "urgente": dias_restantes <= dias_alerta_vencimiento,
+        }
+
+    predicciones = list(
+        Prediccion.objects.filter(producto=producto, fecha_prediccion=fecha_max)
+        .order_by("fecha_pronosticada")
+    ) if fecha_max else []
+    venta_hoy = next((p.valor_predicho for p in predicciones if p.fecha_pronosticada == hoy), None)
+    venta_semana = sum(p.valor_predicho for p in predicciones) if predicciones else None
+    sugerido = calcular_cantidad_sugerida(producto, fecha_max, hoy) if fecha_max else None
+
+    # Riesgo climático solo aplica a Frutas y Verduras (no traen fecha
+    # impresa); para el resto ni siquiera se consulta el clima.
+    riesgo = None
+    if producto.categoria in (Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS):
+        clima_por_dia = pronostico_temperatura_humedad_por_dia()
+        filas, _, _ = calcular_riesgo_por_producto(hoy, clima_por_dia, producto_id=producto.id_producto)
+        if filas:
+            riesgo = filas[0]
+            dia_que_sube = primer_dia_que_sube_de_nivel(riesgo["nivel"], riesgo["dias_proyectados"])
+            riesgo["aviso_proyeccion"] = (
+                f"Sube a {dia_que_sube['nivel']} el "
+                f"{DIAS_SEMANA_ES[dia_que_sube['fecha'].weekday()]} "
+                f"({dia_que_sube['fecha'].strftime('%d/%m')})"
+            ) if dia_que_sube else None
+
+    alertas = [
+        {
+            "mensaje": a.mensaje,
+            "tipo": a.get_tipo_display(),
+            "nivel": NIVEL_POR_TIPO.get(a.tipo, "secondary"),
+        }
+        for a in Alerta.objects.filter(producto=producto, leida=False).order_by("tipo")
+    ]
+
+    return {
+        "producto": producto,
+        "es_peso": producto.unidad_medida == Producto.UnidadMedida.PESO,
+        "stock_actual": stock_actual,
+        "num_lotes": lotes_vigentes.count(),
+        "proximo_vencimiento": proximo_vencimiento,
+        "venta_hoy": venta_hoy,
+        "venta_semana": venta_semana,
+        "sugerido": sugerido,
+        "fecha_corrida": fecha_max,
+        "riesgo": riesgo,
+        "alertas": alertas,
+    }
+
+
+@rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
+def modo_pasillo(request):
+    hoy = timezone.localdate()
+    codigo = limpiar_codigo(request.GET.get("codigo"))
+    producto = buscar_producto_por_codigo(codigo) if codigo else None
+
+    es_admin = request.user.rol == "ADMINISTRADOR" or request.user.is_superuser_admin
+    # Un código que el sistema no conoce (por ejemplo, el de un empaque
+    # real que se va a usar en la demo) lo puede asignar el Administrador
+    # ahí mismo, desde la handheld, sin pasar por la PC.
+    productos_para_asignar = (
+        Producto.objects.filter(activo=True).order_by("nombre")
+        if codigo and not producto and es_admin else []
+    )
+
+    return render(request, "modo_pasillo.html", {
+        "codigo": codigo,
+        "ficha": ficha_pasillo(producto, hoy) if producto else None,
+        "puede_registrar_merma": request.user.rol == "COMPRADOR" or request.user.is_superuser_admin,
+        "puede_asignar_codigo": es_admin,
+        "productos_para_asignar": productos_para_asignar,
+    })
+
+
+def _url_pasillo(codigo):
+    return reverse("modo_pasillo") + "?" + urlencode({"codigo": codigo})
+
+
+@rol_requerido("ADMINISTRADOR")
+@require_POST
+def asignar_codigo_pasillo(request):
+    """Asigna el código escaneado al producto elegido. Si ese código ya lo
+    tiene OTRO producto, no lo pisa: avisa cuál es (codigo_upc es único)."""
+    codigo = limpiar_codigo(request.POST.get("codigo"))
+    if not codigo:
+        messages.error(request, "No llegó ningún código para asignar.")
+        return redirect("modo_pasillo")
+
+    producto = get_object_or_404(Producto, id_producto=request.POST.get("producto"), activo=True)
+    otro = (
+        Producto.objects.filter(codigo_upc__in=variantes_codigo(codigo))
+        .exclude(pk=producto.pk)
+        .first()
+    )
+    if otro:
+        messages.error(request, f"El código {codigo} ya pertenece a {otro.nombre}. No se cambió nada.")
+        return redirect(_url_pasillo(codigo))
+
+    anterior = producto.codigo_upc
+    producto.codigo_upc = codigo
+    producto.save(update_fields=["codigo_upc"])
+    texto = f"Código {codigo} asignado a {producto.nombre}"
+    if anterior and anterior != codigo:
+        texto += f" (reemplaza al anterior, {anterior})"
+    messages.success(request, texto + ".")
+    return redirect(_url_pasillo(codigo))

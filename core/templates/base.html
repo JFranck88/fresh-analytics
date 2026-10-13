@@ -30,6 +30,9 @@
             <a href="{% url 'dashboard' %}" class="sidebar-link {% if request.resolver_match.url_name == 'dashboard' %}activo{% endif %}" title="Dashboard">
                 <i class="bi bi-speedometer2"></i><span class="sidebar-texto">Dashboard</span>
             </a>
+            <a href="{% url 'modo_pasillo' %}" class="sidebar-link {% if request.resolver_match.url_name == 'modo_pasillo' %}activo{% endif %}" title="Modo pasillo">
+                <i class="bi bi-upc-scan"></i><span class="sidebar-texto">Modo pasillo</span>
+            </a>
             <a href="{% url 'listar_predicciones' %}" class="sidebar-link {% if request.resolver_match.url_name == 'listar_predicciones' %}activo{% endif %}" title="Predicciones">
                 <i class="bi bi-graph-up-arrow"></i><span class="sidebar-texto">Predicciones</span>
             </a>

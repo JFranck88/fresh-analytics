@@ -725,3 +725,126 @@ a.topbar-buscador-item:hover {
 .aviso-solo-movil.oculto {
     display: none !important;
 }
+
+/* =====================================================================
+   Modo pasillo (semana 3, 2026-10-13): pantalla para la handheld T60.
+   Se usa con una mano y a la carrera, así que textos y botones grandes.
+   ===================================================================== */
+.pasillo {
+    max-width: 640px;
+}
+.pasillo-escaner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #ffffff;
+    border: 2px solid var(--brote);
+    border-radius: 14px;
+    padding: 8px 8px 8px 14px;
+}
+.pasillo-escaner-icono {
+    font-size: 1.4rem;
+    color: var(--bosque);
+}
+.pasillo-escaner input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: none;
+    font-size: 18px;
+    color: var(--tierra);
+}
+.pasillo-escaner .btn {
+    min-height: 44px;
+}
+.pasillo-codigo {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.25rem;
+    letter-spacing: 1px;
+}
+.pasillo-ficha-cabecera {
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(27, 67, 50, 0.08);
+}
+.pasillo-ficha-cabecera h4 {
+    color: var(--bosque);
+    font-weight: 700;
+}
+.pasillo-datos {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.pasillo-dato {
+    display: flex;
+    flex-direction: column;
+    background-color: var(--lino);
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+.pasillo-dato-destacado {
+    background-color: rgba(82, 183, 136, 0.14);
+}
+.pasillo-dato-etiqueta {
+    font-size: 12.5px;
+    color: var(--musgo);
+}
+.pasillo-dato-valor {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--tierra);
+    white-space: nowrap;
+}
+.pasillo-dato-nota {
+    font-size: 12px;
+    color: var(--musgo);
+}
+.pasillo-bloque {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    border: 1px solid rgba(27, 67, 50, 0.1);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+.pasillo-bloque > i {
+    font-size: 1.15rem;
+    color: var(--bosque);
+    margin-top: 1px;
+}
+.pasillo-bloque-urgente {
+    border-color: rgba(192, 57, 43, 0.35);
+    background-color: rgba(192, 57, 43, 0.06);
+}
+.pasillo-bloque-urgente > i {
+    color: #C0392B;
+}
+.pasillo-alertas {
+    margin-bottom: 10px;
+}
+.pasillo-alerta {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 14px;
+    padding: 6px 0;
+}
+.pasillo-acciones {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 6px;
+}
+.pasillo-acciones .btn {
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pasillo-acciones .btn:only-child {
+    grid-column: 1 / -1;
+}

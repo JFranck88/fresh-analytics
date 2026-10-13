@@ -14,6 +14,10 @@
     {% endif %}
 </div>
 
+{# En el celular / handheld, acceso directo al Modo pasillo (en PC sigue #}
+{# en el menú lateral, sin cambiar el Dashboard de escritorio). #}
+<a href="{% url 'modo_pasillo' %}" class="btn btn-primary w-100 mb-3 d-md-none"><i class="bi bi-upc-scan me-1"></i>Modo pasillo: escanear producto</a>
+
 {% if mensajes_contexto %}
     <div class="mb-4">
         {% for m in mensajes_contexto %}

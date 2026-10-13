@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <div style="max-width: 520px;">
-    <h5 class="mb-3">Registrar merma</h5>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Registrar merma</h5>
+        {% if volver_pasillo %}<a href="javascript:history.back()" class="small"><i class="bi bi-arrow-left me-1"></i>Volver al pasillo</a>{% endif %}
+    </div>
     <div class="card">
         <div class="card-body">
             <form method="post">

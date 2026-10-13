@@ -2469,3 +2469,137 @@ class AppInstalablePwaTests(TestCase):
         comprador = crear_usuario("comprador@test.com", Usuario.Rol.COMPRADOR)
         self.client.force_login(comprador)
         self.assertContains(self.client.get(reverse("dashboard")), 'rel="manifest"')
+
+
+class ModoPasilloTests(TestCase):
+    """Semana 3 del plan de la fase final (2026-10-13): Modo pasillo para la
+    handheld Generalscan T60. Se escanea el código del producto en el
+    anaquel (el lector escribe el código y manda Enter, verificado en el
+    equipo real) y aparece su ficha."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.gerente = crear_usuario("gerente@test.com", Usuario.Rol.GERENTE)
+        self.administrador = crear_usuario("admin@test.com", Usuario.Rol.ADMINISTRADOR)
+        self.hoy = timezone.localdate()
+        self.leche = crear_producto("Leche entera 1L", upc="7401234567890")
+        Prediccion.objects.create(
+            producto=self.leche, fecha_prediccion=self.hoy, fecha_pronosticada=self.hoy,
+            valor_predicho=20, intervalo_inferior=15, intervalo_superior=25, precision_modelo=10.0,
+        )
+        Prediccion.objects.create(
+            producto=self.leche, fecha_prediccion=self.hoy, fecha_pronosticada=self.hoy + timedelta(days=1),
+            valor_predicho=10, intervalo_inferior=8, intervalo_superior=12, precision_modelo=10.0,
+        )
+        Inventario.objects.create(
+            producto=self.leche, fecha_ingreso=self.hoy, cantidad=5, lote="L-PRUEBA",
+            fecha_vencimiento=self.hoy + timedelta(days=2),
+        )
+        Inventario.objects.create(
+            producto=self.leche, fecha_ingreso=self.hoy, cantidad=3,
+            fecha_vencimiento=self.hoy + timedelta(days=9),
+        )
+
+    def escanear(self, codigo, usuario=None):
+        self.client.force_login(usuario or self.comprador)
+        return self.client.get(reverse("modo_pasillo"), {"codigo": codigo})
+
+    def test_los_tres_roles_de_negocio_pueden_entrar(self):
+        for usuario in (self.comprador, self.gerente, self.administrador):
+            self.client.force_login(usuario)
+            self.assertEqual(self.client.get(reverse("modo_pasillo")).status_code, 200, usuario.rol)
+
+    def test_sin_sesion_manda_al_login(self):
+        respuesta = self.client.get(reverse("modo_pasillo"))
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse("login"), respuesta.url)
+
+    def test_escanear_muestra_la_ficha_completa_del_producto(self):
+        respuesta = self.escanear("7401234567890")
+        ficha = respuesta.context["ficha"]
+        self.assertEqual(ficha["producto"], self.leche)
+        self.assertEqual(ficha["stock_actual"], 8)       # 5 + 3 en lotes vigentes
+        self.assertEqual(ficha["num_lotes"], 2)
+        self.assertEqual(ficha["venta_hoy"], 20)
+        self.assertEqual(ficha["venta_semana"], 30)
+        self.assertEqual(ficha["sugerido"], 22)          # 30 pronosticado - 8 en stock
+        self.assertEqual(ficha["proximo_vencimiento"]["dias_restantes"], 2)
+        self.assertTrue(ficha["proximo_vencimiento"]["urgente"])  # dentro de los 3 días de alerta
+        self.assertContains(respuesta, "Leche entera 1L")
+        self.assertContains(respuesta, "Lote L-PRUEBA")
+
+    def test_el_codigo_llega_con_espacios_o_salto_de_linea(self):
+        respuesta = self.escanear("  7401234567890\n")
+        self.assertEqual(respuesta.context["ficha"]["producto"], self.leche)
+
+    def test_upc_de_12_digitos_y_ean_13_con_cero_son_el_mismo_producto(self):
+        producto = crear_producto("Yogurt natural", upc="012345678905")
+        self.assertEqual(self.escanear("0012345678905").context["ficha"]["producto"], producto)
+        producto.codigo_upc = "0012345678905"
+        producto.save()
+        self.assertEqual(self.escanear("012345678905").context["ficha"]["producto"], producto)
+
+    def test_codigo_desconocido_avisa_sin_reventar(self):
+        respuesta = self.escanear("9999999999999")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIsNone(respuesta.context["ficha"])
+        self.assertContains(respuesta, "Código no registrado")
+        self.assertNotContains(respuesta, "Asignar código")  # el Comprador no administra el catálogo
+
+    def test_el_administrador_puede_asignar_un_codigo_nuevo(self):
+        respuesta = self.escanear("7501055300075", usuario=self.administrador)
+        self.assertContains(respuesta, "Asignar código")
+        respuesta = self.client.post(reverse("asignar_codigo_pasillo"), {
+            "codigo": "7501055300075", "producto": self.leche.id_producto,
+        })
+        self.leche.refresh_from_db()
+        self.assertEqual(self.leche.codigo_upc, "7501055300075")
+        self.assertRedirects(respuesta, reverse("modo_pasillo") + "?codigo=7501055300075", fetch_redirect_response=False)
+
+    def test_no_se_puede_asignar_un_codigo_que_ya_es_de_otro_producto(self):
+        queso = crear_producto("Queso fresco", upc="7409999999999")
+        self.client.force_login(self.administrador)
+        self.client.post(reverse("asignar_codigo_pasillo"), {
+            "codigo": "7401234567890", "producto": queso.id_producto,
+        })
+        queso.refresh_from_db()
+        self.assertEqual(queso.codigo_upc, "7409999999999")  # no se tocó
+
+    def test_comprador_no_puede_asignar_codigos(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.post(reverse("asignar_codigo_pasillo"), {
+            "codigo": "1111111111111", "producto": self.leche.id_producto,
+        })
+        self.assertEqual(respuesta.status_code, 403)
+
+    def test_registrar_merma_desde_el_pasillo_precarga_el_producto_y_regresa(self):
+        self.client.force_login(self.comprador)
+        url = reverse("registrar_merma") + f"?producto={self.leche.id_producto}&volver=pasillo"
+        formulario = self.client.get(url).context["form"]
+        self.assertEqual(formulario.initial["producto"], self.leche.id_producto)
+        respuesta = self.client.post(url, {
+            "producto": self.leche.id_producto, "fecha": self.hoy.isoformat(),
+            "cantidad": 1, "motivo": Merma.Motivo.VENCIMIENTO,
+        })
+        self.assertRedirects(respuesta, reverse("modo_pasillo") + "?codigo=7401234567890", fetch_redirect_response=False)
+        self.assertEqual(Merma.objects.filter(producto=self.leche).count(), 1)
+
+    def test_el_gerente_no_ve_el_boton_de_registrar_merma(self):
+        respuesta = self.escanear("7401234567890", usuario=self.gerente)
+        self.assertNotContains(respuesta, "volver=pasillo")
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    def test_frutas_y_verduras_muestran_riesgo_climatico(self, _clima):
+        tomate = crear_producto(
+            "Tomate de riñón", upc="0104100", categoria=Producto.Categoria.VERDURAS,
+            unidad_medida=Producto.UnidadMedida.PESO, vida_util_dias=10,
+        )
+        Inventario.objects.create(
+            producto=tomate, fecha_ingreso=self.hoy - timedelta(days=4), cantidad=12.5,
+            fecha_vencimiento=self.hoy + timedelta(days=6),
+        )
+        ficha = self.escanear("0104100").context["ficha"]
+        self.assertIsNotNone(ficha["riesgo"])
+        self.assertEqual(ficha["riesgo"]["porcentaje_vida_util"], 40)
+        # La leche (Lácteos) no consulta el clima ni muestra riesgo.
+        self.assertIsNone(self.escanear("7401234567890").context["ficha"]["riesgo"])
