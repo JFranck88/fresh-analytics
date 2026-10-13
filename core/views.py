@@ -458,7 +458,7 @@ def calcular_tendencia_aprendizaje(hoy):
     calcular el promedio rodante desde el primer día que se muestra). El
     agregado departamental se expresa en quetzales (valor_predicho/venta
     real × precio_venta), igual que "Venta esperada hoy" del dashboard,
-    porque no tiene sentido sumar kilogramos con unidades entre
+    porque no tiene sentido sumar libras con unidades entre
     productos de categorías distintas."""
     fecha_inicio = hoy - timedelta(days=VENTANA_TENDENCIA_APRENDIZAJE_DIAS)
     fecha_inicio_datos = fecha_inicio - timedelta(days=VENTANA_ERROR_RODANTE_DIAS)
@@ -1079,7 +1079,7 @@ def listar_predicciones(request):
     # haber buscado nada todavía, la primera gráfica es la del DEPARTAMENTO
     # completo, no la de un producto elegido al azar (antes se auto-
     # seleccionaba el primero alfabéticamente sin ningún criterio de
-    # negocio). Se agrega en quetzales, no en unidades/kg - esos no se
+    # negocio). Se agrega en quetzales, no en unidades/libras - esos no se
     # pueden sumar entre productos de categorías distintas - mismo
     # criterio que "Venta esperada hoy" del dashboard.
     departamento_por_fecha = {}
@@ -1337,10 +1337,10 @@ def generar_orden_compra(request):
         sugerido = max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
         if sugerido > 0:
             proveedor = producto.proveedor or "Sin proveedor"
-            # Peso variable en kg (con decimal); por unidad como número
+            # Peso variable en libras (con decimal); por unidad como número
             # entero de piezas - mismo criterio que en pantalla.
             if producto.unidad_medida == Producto.UnidadMedida.PESO:
-                texto_cantidad = f"{sugerido:.2f} kg"
+                texto_cantidad = f"{sugerido:.2f} lb"
             else:
                 texto_cantidad = f"{sugerido:.0f} u."
             filas_por_proveedor.setdefault(proveedor, []).append(

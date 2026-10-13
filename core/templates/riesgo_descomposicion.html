@@ -50,7 +50,7 @@
                         <td class="ocultar-movil">{{ f.categoria }}</td>
                         <td data-label="Cantidad total">
                             <div>
-                                {% if f.unidad_medida == "PESO" %}{{ f.cantidad_total|floatformat:2 }} kg{% else %}{{ f.cantidad_total|floatformat:0 }} u.{% endif %}
+                                {% if f.unidad_medida == "PESO" %}{{ f.cantidad_total|floatformat:2 }} lb{% else %}{{ f.cantidad_total|floatformat:0 }} u.{% endif %}
                                 <span class="text-muted small d-block">{{ f.num_lotes }} lote{{ f.num_lotes|pluralize }} · peor caso</span>
                             </div>
                         </td>

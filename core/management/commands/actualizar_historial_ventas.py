@@ -24,8 +24,9 @@ from django.utils import timezone
 
 from core.clima import lluvia_sintetica
 from core.management.commands.generar_datos_prueba import (
-    BASE_DEMANDA,
     FACTOR_SEMANA,
+    MERMA_MINIMA_PESO,
+    demanda_base,
 )
 from core.models import Inventario, Merma, Producto, Venta
 
@@ -89,7 +90,7 @@ class Command(BaseCommand):
         ventas_bulk, mermas_bulk, inventarios_bulk = [], [], []
 
         for producto in productos:
-            base = BASE_DEMANDA.get(producto.categoria, 20)
+            base = demanda_base(producto)
             cantidad_dia = max(0, producto.redondear_cantidad(
                 random.gauss(base * factor_total, base * 0.15)
             ))
@@ -112,13 +113,13 @@ class Command(BaseCommand):
                     # Venta.cantidad e Inventario.cantidad
                     # (redondear_cantidad, definida en
                     # generar_datos_prueba.py) - entero completo para
-                    # productos por unidad, decimal en kg para productos
+                    # productos por unidad, decimal en libras para productos
                     # de peso variable (ver el mismo criterio y su
                     # justificación completa ahí). Como el dado de arriba
                     # ya decide SI hay merma ese día, una vez que ocurre
                     # se garantiza una cantidad mínima perceptible: 1
-                    # unidad completa, o 0.05 kg para peso variable.
-                    minimo = 0.05 if producto.unidad_medida == "PESO" else 1
+                    # unidad completa, o 0.10 lb para peso variable.
+                    minimo = MERMA_MINIMA_PESO if producto.unidad_medida == "PESO" else 1
                     cantidad_merma = max(minimo, producto.redondear_cantidad(
                         cantidad_dia * random.uniform(0.005, 0.03)
                     ))
@@ -146,7 +147,7 @@ class Command(BaseCommand):
             # Reposición de inventario: un lote nuevo cada día, como en una
             # tienda real donde el stock se repone constantemente.
             cantidad_lote = producto.redondear_cantidad(
-                BASE_DEMANDA.get(producto.categoria, 20) * random.uniform(2.5, 4)
+                demanda_base(producto) * random.uniform(2.5, 4)
             )
             inventarios_bulk.append(Inventario(
                 producto=producto, fecha_ingreso=fecha,

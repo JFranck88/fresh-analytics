@@ -28,10 +28,10 @@
                         <td class="text-muted small celda-sub">{{ r.producto_upc|default:"—" }}</td>
                         <td class="celda-titulo">{{ r.producto }}</td>
                         {% if r.unidad_medida == "PESO" %}
-                        <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:2 }} kg</td>
-                        <td data-label="Stock actual">{{ r.stock_actual|floatformat:2 }} kg</td>
-                        <td data-label="Sugerido"><strong>{{ r.sugerido|floatformat:2 }} kg</strong></td>
-                        <td data-label="Ajustar (kg)"><input inputmode="decimal" type="number" step="0.01" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 100px" value="{{ r.sugerido }}"></td>
+                        <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:2 }} lb</td>
+                        <td data-label="Stock actual">{{ r.stock_actual|floatformat:2 }} lb</td>
+                        <td data-label="Sugerido"><strong>{{ r.sugerido|floatformat:2 }} lb</strong></td>
+                        <td data-label="Ajustar (lb)"><input inputmode="decimal" type="number" step="0.01" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 100px" value="{{ r.sugerido }}"></td>
                         {% else %}
                         <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:0 }} u.</td>
                         <td data-label="Stock actual">{{ r.stock_actual|floatformat:0 }} u.</td>

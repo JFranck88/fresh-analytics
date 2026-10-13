@@ -43,28 +43,28 @@ Se usa dentro de modo_pasillo.html y también se devuelve solo, con
         <div class="card-body">
             <div class="pasillo-ficha-cabecera">
                 <h4 class="mb-0">{{ p.nombre }}</h4>
-                <span class="text-muted small">{{ p.codigo_upc }} · {{ p.get_categoria_display }} · {% if ficha.es_peso %}peso variable (kg){% else %}por unidad{% endif %}</span>
+                <span class="text-muted small">{{ p.codigo_upc }} · {{ p.get_categoria_display }} · {% if ficha.es_peso %}peso variable (lb){% else %}por unidad{% endif %}</span>
             </div>
 
             <div class="pasillo-datos">
                 <div class="pasillo-dato">
                     <span class="pasillo-dato-etiqueta">Stock vigente</span>
-                    <span class="pasillo-dato-valor">{% if ficha.es_peso %}{{ ficha.stock_actual|floatformat:2 }} kg{% else %}{{ ficha.stock_actual|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-valor">{% if ficha.es_peso %}{{ ficha.stock_actual|floatformat:2 }} lb{% else %}{{ ficha.stock_actual|floatformat:0 }} u.{% endif %}</span>
                     <span class="pasillo-dato-nota">{{ ficha.num_lotes }} lote{{ ficha.num_lotes|pluralize }}</span>
                 </div>
                 <div class="pasillo-dato">
                     <span class="pasillo-dato-etiqueta">Venta esperada hoy</span>
-                    <span class="pasillo-dato-valor">{% if ficha.venta_hoy is None %}—{% elif ficha.es_peso %}{{ ficha.venta_hoy|floatformat:2 }} kg{% else %}{{ ficha.venta_hoy|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-valor">{% if ficha.venta_hoy is None %}—{% elif ficha.es_peso %}{{ ficha.venta_hoy|floatformat:2 }} lb{% else %}{{ ficha.venta_hoy|floatformat:0 }} u.{% endif %}</span>
                     <span class="pasillo-dato-nota">pronóstico Prophet</span>
                 </div>
                 <div class="pasillo-dato">
                     <span class="pasillo-dato-etiqueta">Próximos 7 días</span>
-                    <span class="pasillo-dato-valor">{% if ficha.venta_semana is None %}—{% elif ficha.es_peso %}{{ ficha.venta_semana|floatformat:2 }} kg{% else %}{{ ficha.venta_semana|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-valor">{% if ficha.venta_semana is None %}—{% elif ficha.es_peso %}{{ ficha.venta_semana|floatformat:2 }} lb{% else %}{{ ficha.venta_semana|floatformat:0 }} u.{% endif %}</span>
                     <span class="pasillo-dato-nota">venta esperada</span>
                 </div>
                 <div class="pasillo-dato pasillo-dato-destacado">
                     <span class="pasillo-dato-etiqueta">Sugerido pedir</span>
-                    <span class="pasillo-dato-valor">{% if ficha.sugerido is None %}—{% elif ficha.es_peso %}{{ ficha.sugerido|floatformat:2 }} kg{% else %}{{ ficha.sugerido|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-valor">{% if ficha.sugerido is None %}—{% elif ficha.es_peso %}{{ ficha.sugerido|floatformat:2 }} lb{% else %}{{ ficha.sugerido|floatformat:0 }} u.{% endif %}</span>
                     <span class="pasillo-dato-nota">{% if ficha.sugerido %}hay que reabastecer{% elif ficha.sugerido is not None %}stock suficiente{% endif %}</span>
                 </div>
             </div>
@@ -76,7 +76,7 @@ Se usa dentro de modo_pasillo.html y también se devuelve solo, con
                     <div>
                         <strong>Lote más próximo a vencer:</strong>
                         {% if v.dias_restantes == 0 %}vence <strong>hoy</strong>{% elif v.dias_restantes == 1 %}vence <strong>mañana</strong>{% else %}vence el {{ v.dia_semana }} {{ v.fecha|date:"d/m" }} (en {{ v.dias_restantes }} días){% endif %}
-                        · {% if ficha.es_peso %}{{ v.cantidad|floatformat:2 }} kg{% else %}{{ v.cantidad|floatformat:0 }} u.{% endif %}
+                        · {% if ficha.es_peso %}{{ v.cantidad|floatformat:2 }} lb{% else %}{{ v.cantidad|floatformat:0 }} u.{% endif %}
                         {% if v.lote %}<span class="text-muted small d-block">Lote {{ v.lote }}</span>{% endif %}
                     </div>
                 </div>

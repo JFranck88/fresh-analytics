@@ -4,29 +4,35 @@ from datetime import datetime, time, timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from core.models import Producto, Venta, Inventario, Merma
+from core.models import LIBRAS_POR_KILO, Producto, Venta, Inventario, Merma
 from core.clima import lluvia_sintetica
 
 
 # El 7mo campo de cada tupla es Producto.UnidadMedida: "UNIDAD" (se cuenta
 # por pieza - siempre cantidades enteras) o "PESO" (peso variable, se pesa
-# suelto en caja - cantidades en kg, con decimales). Clasificación
+# suelto en caja - cantidades en libras, con decimales). Clasificación
 # confirmada con Francisco (2026-09-18): los 6 marcados como PESO son los
 # que en un súper real se pesan en la caja; el resto vienen empacados o se
 # cuentan por pieza. "Pan de molde" se reemplazó por "Pan dulce" - no es un
 # producto típico en Guatemala.
+#
+# Precios en quetzales: por pieza para UNIDAD y POR LIBRA para PESO
+# (2026-10-13: en Guatemala se vende por libra). Los de PESO son los
+# mismos precios por kilo de antes divididos entre 2.20462, igual que la
+# migración 0011 convirtió los de producción - así una base nueva y la
+# migrada quedan iguales.
 CATALOGO = [
     ("Leche entera 1L", "LACTEOS", 10, "Lacteos San Miguel", 6.00, 9.00, "UNIDAD"),
     ("Queso fresco", "LACTEOS", 10, "Lacteos San Miguel", 18.00, 25.00, "UNIDAD"),
     ("Yogurt natural", "LACTEOS", 14, "Lacteos San Miguel", 5.00, 8.00, "UNIDAD"),
-    ("Pechuga de pollo", "CARNES", 4, "Avicola Petapa", 20.00, 32.00, "PESO"),
-    ("Carne molida de res", "CARNES", 3, "Carnicos del Valle", 28.00, 42.00, "PESO"),
+    ("Pechuga de pollo", "CARNES", 4, "Avicola Petapa", 9.07, 14.51, "PESO"),
+    ("Carne molida de res", "CARNES", 3, "Carnicos del Valle", 12.70, 19.05, "PESO"),
     ("Chorizo", "CARNES", 7, "Carnicos del Valle", 15.00, 24.00, "UNIDAD"),
-    ("Tomate de riñón", "VERDURAS", 5, "Agroexport GT", 5.00, 8.50, "PESO"),
-    ("Cebolla blanca", "VERDURAS", 12, "Agroexport GT", 3.50, 6.00, "PESO"),
+    ("Tomate de riñón", "VERDURAS", 5, "Agroexport GT", 2.27, 3.86, "PESO"),
+    ("Cebolla blanca", "VERDURAS", 12, "Agroexport GT", 1.59, 2.72, "PESO"),
     ("Lechuga", "VERDURAS", 6, "Agroexport GT", 3.00, 5.50, "UNIDAD"),
-    ("Manzana roja", "FRUTAS", 15, "Frutas del Altiplano", 4.00, 6.00, "PESO"),
-    ("Banano", "FRUTAS", 6, "Frutas del Altiplano", 2.50, 4.00, "PESO"),
+    ("Manzana roja", "FRUTAS", 15, "Frutas del Altiplano", 1.81, 2.72, "PESO"),
+    ("Banano", "FRUTAS", 6, "Frutas del Altiplano", 1.13, 1.81, "PESO"),
     ("Aguacate hass", "FRUTAS", 5, "Frutas del Altiplano", 6.00, 9.50, "UNIDAD"),
     ("Pan francés", "PANADERIA", 2, "Panificadora Ideal", 1.50, 2.50, "UNIDAD"),
     ("Pan dulce", "PANADERIA", 3, "Panificadora Ideal", 1.00, 1.75, "UNIDAD"),
@@ -41,6 +47,23 @@ BASE_DEMANDA = {
     "VERDURAS": 35,
     "PANADERIA": 40,
 }
+
+# Merma mínima cuando el dado dice que sí hubo merma: 1 pieza completa, o
+# 0.10 lb para peso variable (antes 0.05 kg).
+MERMA_MINIMA_PESO = 0.10
+
+
+def demanda_base(producto):
+    """Demanda diaria base del producto en SU medida. BASE_DEMANDA está
+    pensada en piezas o kilos por categoría; para peso variable se pasa a
+    libras (x 2.20462), así el historial nuevo sigue la misma escala que el
+    que la migración 0011 convirtió de kg a lb y Prophet no ve un "salto"
+    falso en las ventas."""
+    base = BASE_DEMANDA.get(producto.categoria, 20)
+    if producto.unidad_medida == "PESO":
+        return base * LIBRAS_POR_KILO
+    return base
+
 
 # La precisión de cada cantidad (venta, merma, lote) según sea peso
 # variable o por unidad vive en Producto.redondear_cantidad() - un único
@@ -90,7 +113,7 @@ class Command(BaseCommand):
             factor_total = factor_semana * factor_quincena * factor_estacional
 
             for producto in productos:
-                base = BASE_DEMANDA.get(producto.categoria, 20)
+                base = demanda_base(producto)
                 cantidad_dia = max(0, producto.redondear_cantidad(
                     random.gauss(base * factor_total, base * 0.15)
                 ))
@@ -118,7 +141,7 @@ class Command(BaseCommand):
                     # redondeo que Venta.cantidad e Inventario.cantidad
                     # (redondear_cantidad, ver arriba) - entero completo
                     # para productos por unidad ("0,5 yogures" no tiene
-                    # sentido), decimal en kg para productos de peso
+                    # sentido), decimal en libras para productos de peso
                     # variable (reportado por Francisco al ver decimales
                     # en Historial de Mermas para un producto por pieza;
                     # confirmado que sí tienen sentido para peso variable,
@@ -126,8 +149,8 @@ class Command(BaseCommand):
                     # hay merma ese día, una vez que ocurre se garantiza
                     # una cantidad mínima perceptible (en vez de que el
                     # redondeo la deje en 0 y se pierda el registro): 1
-                    # unidad completa, o 0.05 kg para peso variable.
-                    minimo = 0.05 if producto.unidad_medida == "PESO" else 1
+                    # unidad completa, o 0.10 lb para peso variable.
+                    minimo = MERMA_MINIMA_PESO if producto.unidad_medida == "PESO" else 1
                     cantidad_merma = max(minimo, producto.redondear_cantidad(
                         cantidad_dia * random.uniform(0.005, 0.03)
                     ))
@@ -155,7 +178,7 @@ class Command(BaseCommand):
             if dia_num % 3 == 0:
                 for producto in productos:
                     cantidad_lote = producto.redondear_cantidad(
-                        BASE_DEMANDA.get(producto.categoria, 20) * random.uniform(2.5, 4)
+                        demanda_base(producto) * random.uniform(2.5, 4)
                     )
                     inventarios_bulk.append(Inventario(
                         producto=producto, fecha_ingreso=fecha,

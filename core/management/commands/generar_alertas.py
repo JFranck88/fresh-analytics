@@ -53,11 +53,11 @@ class Command(BaseCommand):
                 )["total"] or 0
                 proxima = lotes_por_vencer.order_by("fecha_vencimiento").first()
                 dias_restantes = (proxima.fecha_vencimiento - hoy).days
-                # Peso variable se reporta en kg (con decimal); por unidad,
+                # Peso variable se reporta en libras (con decimal); por unidad,
                 # en piezas enteras - mismo criterio que en pantalla (ver
                 # Producto.unidad_medida).
                 texto_cantidad = (
-                    f"{cantidad_riesgo:.2f} kg" if producto.unidad_medida == Producto.UnidadMedida.PESO
+                    f"{cantidad_riesgo:.2f} lb" if producto.unidad_medida == Producto.UnidadMedida.PESO
                     else f"{cantidad_riesgo:.0f} unidades"
                 )
                 vigentes.append(Alerta(
@@ -85,7 +85,7 @@ class Command(BaseCommand):
                 # criterio que la alerta de vencimiento de arriba y que el
                 # resto de pantallas del sistema.
                 es_peso = producto.unidad_medida == Producto.UnidadMedida.PESO
-                fmt_cantidad = (lambda v: f"{v:.2f} kg") if es_peso else (lambda v: f"{v:.0f} unidades")
+                fmt_cantidad = (lambda v: f"{v:.2f} lb") if es_peso else (lambda v: f"{v:.0f} unidades")
 
                 # P-07B: Verificar stock bajo
                 if stock_actual < prediccion_cobertura:

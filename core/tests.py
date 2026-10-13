@@ -12,6 +12,7 @@ manual completa, pero cubre las rutas críticas.
 """
 
 import json
+import re
 from datetime import date, timedelta
 from io import StringIO
 from unittest.mock import patch
@@ -1193,7 +1194,7 @@ class PrediccionesDetalleDiaTests(TestCase):
 class PrediccionesDepartamentoTests(TestCase):
     """Requerimiento de Francisco (2026-09-18): al entrar a Predicciones
     sin haber buscado nada todavía, la primera gráfica es la del
-    DEPARTAMENTO completo, en quetzales (no se pueden sumar kg con
+    DEPARTAMENTO completo, en quetzales (no se pueden sumar libras con
     unidades entre productos de categorías distintas) - mismo criterio
     que "Venta esperada hoy" del dashboard."""
 
@@ -2067,7 +2068,7 @@ class BuscarProductosJsonUnidadMedidaTests(TestCase):
 
 class RecomendacionesUnidadMedidaTests(TestCase):
     """El criterio de peso variable también aplica a la cantidad sugerida
-    de reabastecimiento: para un producto que se pesa (kg), el sugerido y
+    de reabastecimiento: para un producto que se pesa (lb), el sugerido y
     el ajuste pueden tener decimales; para uno por pieza, deben ser
     siempre un entero (reportado por Francisco, 2026-09-17/18)."""
 
@@ -2112,7 +2113,7 @@ class RecomendacionesUnidadMedidaTests(TestCase):
 
 
 class HistorialDecisionesUnidadMedidaTests(TestCase):
-    """La tabla de Historial de decisiones debe mostrar kg para productos
+    """La tabla de Historial de decisiones debe mostrar lb para productos
     de peso variable y unidades para el resto - mismo criterio que en
     toda la pantalla de Recomendaciones."""
 
@@ -2126,15 +2127,15 @@ class HistorialDecisionesUnidadMedidaTests(TestCase):
         )
         self.client.force_login(self.comprador)
 
-    def test_muestra_kg_para_producto_de_peso_variable(self):
+    def test_muestra_lb_para_producto_de_peso_variable(self):
         respuesta = self.client.get(reverse("historial_decisiones"))
         # El formato local (es-GT) usa coma decimal - igual que el resto
         # del sistema (ej. "Q 18,00" en Mermas).
-        self.assertContains(respuesta, "18,25 kg")
+        self.assertContains(respuesta, "18,25 lb")
 
 
 class RiesgoDescomposicionUnidadMedidaTests(TestCase):
-    """La columna Cantidad de Riesgo climático debe mostrar kg para
+    """La columna Cantidad de Riesgo climático debe mostrar lb para
     productos de peso variable y unidades para el resto - mismo criterio
     en todo el sistema (reportado por Francisco, 2026-09-17/18)."""
 
@@ -2159,9 +2160,9 @@ class RiesgoDescomposicionUnidadMedidaTests(TestCase):
         )
         self.client.force_login(self.gerente)
 
-    def test_producto_de_peso_variable_muestra_kg(self):
+    def test_producto_de_peso_variable_muestra_lb(self):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        self.assertContains(respuesta, "8,40 kg")  # coma decimal (es-GT)
+        self.assertContains(respuesta, "8,40 lb")  # coma decimal (es-GT)
 
     def test_producto_por_unidad_muestra_u(self):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
@@ -2186,9 +2187,9 @@ class ListarMermasUnidadMedidaTests(TestCase):
         )
         self.client.force_login(self.gerente)
 
-    def test_peso_variable_muestra_kg(self):
+    def test_peso_variable_muestra_lb(self):
         respuesta = self.client.get(reverse("listar_mermas"))
-        self.assertContains(respuesta, "0,90 kg")  # coma decimal (es-GT)
+        self.assertContains(respuesta, "0,90 lb")  # coma decimal (es-GT)
 
     def test_por_unidad_muestra_u(self):
         respuesta = self.client.get(reverse("listar_mermas"))
@@ -2241,11 +2242,11 @@ class GenerarDatosPruebaUnidadMedidaTests(TestCase):
         self.assertTrue(cantidades)
         self.assertTrue(all(c == int(c) for c in cantidades))
 
-    def test_merma_minima_es_0_05_kg_para_peso_variable(self):
+    def test_merma_minima_es_0_10_lb_para_peso_variable(self):
         pechuga = Producto.objects.get(nombre="Pechuga de pollo")
         mermas = Merma.objects.filter(producto=pechuga)
         if mermas.exists():
-            self.assertTrue(all(m.cantidad >= 0.05 for m in mermas))
+            self.assertTrue(all(m.cantidad >= 0.10 for m in mermas))
 
     def test_merma_minima_es_1_unidad_para_producto_por_unidad(self):
         queso = Producto.objects.get(nombre="Queso fresco")
@@ -2710,3 +2711,122 @@ class AvisoQuincenaTests(TestCase):
         with patch("core.views.timezone.localdate", return_value=self.HOY):
             respuesta = self.client.get(reverse("dashboard"))
         self.assertContains(respuesta, "Se acerca la quincena")
+
+
+class MedidaEnLibrasTests(TestCase):
+    """Requerimiento de Francisco (2026-10-13): en Guatemala el peso se
+    maneja en libras. Todo lo de peso variable se guarda en libras y
+    quetzales por libra; la migración 0011 convierte lo que ya estaba en
+    kilogramos."""
+
+    def setUp(self):
+        from importlib import import_module
+        self.migracion = import_module("core.migrations.0011_peso_en_libras")
+        self.hoy = timezone.localdate()
+        self.comprador = crear_usuario("comprador.libras@test.com", Usuario.Rol.COMPRADOR)
+        # Datos "como estaban antes" (en kg y Q/kg).
+        self.pollo = crear_producto(
+            nombre="Pechuga de pollo", upc="7401112220001", categoria=Producto.Categoria.CARNES,
+            unidad_medida=Producto.UnidadMedida.PESO, precio_compra=20.00, precio_venta=32.00,
+        )
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7401112220002")
+        for producto, cantidad in ((self.pollo, 10.0), (self.leche, 10)):
+            Venta.objects.create(producto=producto, fecha=timezone.now(), cantidad=cantidad,
+                                 precio_unitario=producto.precio_venta)
+            Inventario.objects.create(producto=producto, fecha_ingreso=self.hoy, cantidad=cantidad,
+                                      fecha_vencimiento=self.hoy + timedelta(days=2))
+            Merma.objects.create(producto=producto, fecha=self.hoy, cantidad=1,
+                                 motivo=Merma.Motivo.DANO, costo_perdida=20.00)
+            Prediccion.objects.create(producto=producto, fecha_prediccion=self.hoy,
+                                      fecha_pronosticada=self.hoy, valor_predicho=10,
+                                      intervalo_inferior=8, intervalo_superior=12)
+            DecisionHistorial.objects.create(producto=producto, usuario=self.comprador,
+                                             fecha_prediccion=self.hoy,
+                                             cantidad_sugerida=10, cantidad_ajustada=12)
+        Alerta.objects.create(producto=self.pollo, tipo=Alerta.Tipo.STOCK_BAJO,
+                              mensaje="Stock actual (5.00 kg) no cubre la venta esperada de los próximos 2 días (12.50 kg).")
+
+    def migrar(self):
+        from django.apps import apps
+        self.migracion.kilos_a_libras(apps, None)
+
+    def test_migracion_convierte_cantidades_a_libras(self):
+        self.migrar()
+        self.assertEqual(Venta.objects.get(producto=self.pollo).cantidad, 22.05)
+        self.assertEqual(Inventario.objects.get(producto=self.pollo).cantidad, 22.05)
+        self.assertEqual(Merma.objects.get(producto=self.pollo).cantidad, 2.2)
+        decision = DecisionHistorial.objects.get(producto=self.pollo)
+        self.assertEqual((decision.cantidad_sugerida, decision.cantidad_ajustada), (22.05, 26.46))
+        prediccion = Prediccion.objects.get(producto=self.pollo)
+        self.assertAlmostEqual(prediccion.valor_predicho, 22.0462)
+        self.assertAlmostEqual(prediccion.intervalo_inferior, 17.63696)
+        self.assertAlmostEqual(prediccion.intervalo_superior, 26.45544)
+
+    def test_migracion_convierte_precios_a_quetzales_por_libra(self):
+        self.migrar()
+        self.pollo.refresh_from_db()
+        self.assertEqual((str(self.pollo.precio_compra), str(self.pollo.precio_venta)), ("9.07", "14.51"))
+        self.assertEqual(str(Venta.objects.get(producto=self.pollo).precio_unitario), "14.51")
+
+    def test_los_quetzales_no_cambian(self):
+        self.migrar()
+        venta = Venta.objects.get(producto=self.pollo)
+        self.assertAlmostEqual(venta.cantidad * float(venta.precio_unitario), 320.0, delta=0.5)
+        self.assertEqual(str(Merma.objects.get(producto=self.pollo).costo_perdida), "20.00")
+
+    def test_migracion_no_toca_productos_por_unidad(self):
+        self.migrar()
+        self.leche.refresh_from_db()
+        self.assertEqual(str(self.leche.precio_venta), "8.00")
+        self.assertEqual(Venta.objects.get(producto=self.leche).cantidad, 10)
+        self.assertEqual(Prediccion.objects.get(producto=self.leche).valor_predicho, 10)
+
+    def test_migracion_reescribe_mensajes_de_alertas(self):
+        self.migrar()
+        self.assertEqual(
+            Alerta.objects.get().mensaje,
+            "Stock actual (11.02 lb) no cubre la venta esperada de los próximos 2 días (27.56 lb).",
+        )
+
+    def test_migracion_es_reversible(self):
+        from django.apps import apps
+        self.migrar()
+        self.migracion.libras_a_kilos(apps, None)
+        self.pollo.refresh_from_db()
+        self.assertEqual(Venta.objects.get(producto=self.pollo).cantidad, 10.0)
+        self.assertAlmostEqual(float(self.pollo.precio_venta), 32.00, delta=0.02)
+        self.assertIn("5.00 kg", Alerta.objects.get().mensaje)
+
+    def test_la_unidad_se_llama_peso_en_libras(self):
+        self.assertEqual(Producto.UnidadMedida.PESO.label, "Peso (lb)")
+
+    def test_generadores_producen_peso_variable_en_libras(self):
+        from core.management.commands.generar_datos_prueba import BASE_DEMANDA, CATALOGO, demanda_base
+        self.assertAlmostEqual(demanda_base(self.pollo), BASE_DEMANDA["CARNES"] * 2.20462)
+        self.assertEqual(demanda_base(self.leche), BASE_DEMANDA["LACTEOS"])
+        precios = {fila[0]: (fila[4], fila[5]) for fila in CATALOGO}
+        self.assertEqual(precios["Pechuga de pollo"], (9.07, 14.51))  # Q por libra
+        self.assertEqual(precios["Leche entera 1L"], (6.00, 9.00))     # Q por pieza
+
+    def test_alertas_nuevas_salen_en_libras(self):
+        call_command("generar_alertas", stdout=StringIO())
+        mensajes = " ".join(Alerta.objects.filter(producto=self.pollo).values_list("mensaje", flat=True))
+        self.assertIn(" lb", mensajes)
+        self.assertNotIn(" kg", mensajes)
+
+    def test_pantallas_muestran_libras_y_no_kilos(self):
+        Alerta.objects.all().delete()  # la del setUp trae texto viejo en kg a propósito
+        self.client.force_login(self.comprador)
+        paginas = [
+            (reverse("modo_pasillo"), {"codigo": self.pollo.codigo_upc}),
+            (reverse("listar_predicciones"), {}),
+            (reverse("listar_recomendaciones"), {}),
+            (reverse("historial_decisiones"), {}),
+            (reverse("listar_mermas"), {}),
+        ]
+        for url, params in paginas:
+            respuesta = self.client.get(url, params)
+            self.assertEqual(respuesta.status_code, 200, url)
+            contenido = respuesta.content.decode()
+            self.assertIn(" lb", contenido, url)
+            self.assertIsNone(re.search(r"\d kg\b|\(kg\)|' kg'", contenido), url)

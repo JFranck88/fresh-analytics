@@ -50,12 +50,12 @@
     }
 
     // Mismo criterio que Predicciones: el agregado de departamento se
-    // expresa en quetzales (no se pueden sumar kg con unidades entre
+    // expresa en quetzales (no se pueden sumar libras con unidades entre
     // productos distintos); por producto, en sus propias unidades.
     function etiquetaValor(pid) {
         if (pid === 'departamento') return 'Venta estimada del departamento (Q)';
         const info = infoProductos[pid] || {};
-        return info.unidad_medida === 'PESO' ? 'Kg de venta esperados' : 'Unidades de venta esperadas';
+        return info.unidad_medida === 'PESO' ? 'Libras de venta esperadas' : 'Unidades de venta esperadas';
     }
 
     function buscarProductoLocal() {

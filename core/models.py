@@ -11,6 +11,12 @@ del framework - la tabla física no cambia de nombre de columna.
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.db import models
 
+# Guatemala vende y compra por libra: todo lo de peso variable se guarda en
+# libras (cantidades) y quetzales por libra (precios). Solo se usa para
+# convertir datos que vengan en kilogramos (migración 0011 y generadores
+# de datos sintéticos, cuya demanda base está pensada en kg).
+LIBRAS_POR_KILO = 2.20462
+
 
 class Producto(models.Model):
     class Categoria(models.TextChoices):
@@ -22,7 +28,7 @@ class Producto(models.Model):
 
     class UnidadMedida(models.TextChoices):
         UNIDAD = "UNIDAD", "Unidad"
-        PESO = "PESO", "Peso (kg)"
+        PESO = "PESO", "Peso (lb)"
 
     id_producto = models.AutoField(primary_key=True)
     nombre = models.CharField(max_length=200)
@@ -40,9 +46,9 @@ class Producto(models.Model):
                    "empacado) - las cantidades siempre son números enteros. "
                    "PESO: producto de peso variable, se pesa suelto en caja "
                    "(carnes, algunas frutas/verduras) - las cantidades se "
-                   "manejan en kilogramos y sí tienen sentido los decimales "
-                   "(ej. 0.9 kg). Reportado por Francisco al ver mermas con "
-                   "decimales sin sentido en productos que se cuentan por "
+                   "manejan en libras - la medida que se usa en Guatemala - "
+                   "y sí tienen sentido los decimales (ej. 2.5 lb). Reportado "
+                   "por Francisco al ver mermas con decimales sin sentido en productos que se cuentan por "
                    "pieza (ver decisiones-and-learnings.md, 2026-09-17/18); "
                    "es el mismo concepto que GS1 llama \"peso variable\" en "
                    "sus códigos de barras (prefijo 2, peso codificado en el "
@@ -66,7 +72,7 @@ class Producto(models.Model):
 
     def redondear_cantidad(self, valor):
         """Redondea una cantidad de este producto a la precisión que le
-        corresponde: 2 decimales en kg para peso variable (se pesa suelto
+        corresponde: 2 decimales en libras para peso variable (se pesa suelto
         en caja), entero completo para productos que se cuentan por pieza
         - no existe "0.9 quesos" (reportado por Francisco, 2026-09-17/18;
         mismo concepto que la industria llama "peso variable" o "catch
