@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.contrib import messages
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Sum, F, Q, Avg, Max, DecimalField
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import FileResponse, JsonResponse
@@ -25,6 +26,7 @@ from .forms import (
     EditarUsuarioForm, RestablecerPasswordForm,
 )
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta, DecisionHistorial
+from .inventario import descontar_merma
 from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_por_dia
 from .riesgo_descomposicion import calcular_riesgo_lote, primer_dia_que_sube_de_nivel
 
@@ -928,15 +930,35 @@ def marcar_alerta_leida(request, alerta_id):
     return redirect("listar_alertas")
 
 
+def _texto_cantidad(producto, valor):
+    """'12,50 lb' para peso variable, '3 u.' por unidad (coma decimal es-GT)."""
+    if producto.unidad_medida == Producto.UnidadMedida.PESO:
+        return f"{valor:.2f} lb".replace(".", ",")
+    return f"{valor:.0f} u."
+
+
 @rol_requerido("COMPRADOR")
 def registrar_merma(request):
     if request.method == "POST":
         form = MermaForm(request.POST)
         if form.is_valid():
-            merma = form.save(commit=False)
-            merma.costo_perdida = round(float(merma.producto.precio_compra) * merma.cantidad, 2)
-            merma.save()
-            messages.success(request, "Merma registrada correctamente.")
+            with transaction.atomic():
+                merma = form.save(commit=False)
+                merma.costo_perdida = round(float(merma.producto.precio_compra) * merma.cantidad, 2)
+                merma.save()
+                # UC-02: "la merma queda contabilizada y el inventario
+                # ajustado". Se descuenta del lote que vence primero (FEFO);
+                # si es por VENCIMIENTO, primero de los lotes ya vencidos.
+                descontado = descontar_merma(merma)
+            if descontado + 1e-9 < merma.cantidad:
+                producto = merma.producto
+                messages.warning(request, (
+                    f"Merma registrada, pero el sistema solo tenía "
+                    f"{_texto_cantidad(producto, descontado)} en inventario y se "
+                    f"descontó eso. Conviene revisar el conteo físico de {producto.nombre}."
+                ))
+            else:
+                messages.success(request, "Merma registrada correctamente y descontada del inventario.")
             # Si se llegó desde el Modo pasillo, se regresa a la ficha del
             # mismo producto para seguir recorriendo el pasillo.
             if request.GET.get("volver") == "pasillo" and merma.producto.codigo_upc:

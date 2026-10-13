@@ -18,6 +18,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.db.models import Sum
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -2830,3 +2831,157 @@ class MedidaEnLibrasTests(TestCase):
             contenido = respuesta.content.decode()
             self.assertIn(" lb", contenido, url)
             self.assertIsNone(re.search(r"\d kg\b|\(kg\)|' kg'", contenido), url)
+
+
+class InventarioVivoTests(TestCase):
+    """2026-10-13: el stock era la suma de todos los lotes que habían entrado
+    y no habían vencido, porque ni las ventas ni las mermas lo descontaban.
+    Ahora Inventario.cantidad es el saldo del lote, y las salidas se
+    descuentan con la regla FEFO (sale primero el lote que vence antes).
+    Ver core/inventario.py."""
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        self.comprador = crear_usuario("comprador.inventario@test.com", Usuario.Rol.COMPRADOR)
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7401112230001", vida_util_dias=10)
+
+    def lote(self, cantidad, vence_en, ingreso_hace=1, producto=None):
+        return Inventario.objects.create(
+            producto=producto or self.leche, cantidad=cantidad, cantidad_inicial=cantidad,
+            fecha_ingreso=self.hoy - timedelta(days=ingreso_hace),
+            fecha_vencimiento=self.hoy + timedelta(days=vence_en),
+        )
+
+    def simulador(self):
+        from core.inventario import SimuladorInventario
+        sim = SimuladorInventario(Inventario)
+        sim.cargar([self.leche.id_producto], self.hoy)
+        return sim
+
+    def test_fefo_descuenta_primero_el_lote_que_vence_antes(self):
+        tarde = self.lote(10, vence_en=8)
+        pronto = self.lote(10, vence_en=2)
+        sim = self.simulador()
+        self.assertEqual(sim.consumir(self.leche, 13, self.hoy), 13)
+        sim.guardar()
+        pronto.refresh_from_db(); tarde.refresh_from_db()
+        self.assertEqual((pronto.cantidad, tarde.cantidad), (0, 7))
+
+    def test_nunca_deja_saldos_negativos(self):
+        self.lote(5, vence_en=3)
+        sim = self.simulador()
+        self.assertEqual(sim.consumir(self.leche, 8, self.hoy), 5)
+        sim.guardar()
+        self.assertFalse(Inventario.objects.filter(cantidad__lt=0).exists())
+
+    def test_merma_por_vencimiento_sale_primero_de_lo_ya_vencido(self):
+        vencido = self.lote(4, vence_en=-1, ingreso_hace=11)
+        vigente = self.lote(10, vence_en=5)
+        sim = self.simulador()
+        sim.consumir(self.leche, 4, self.hoy, vencidos_primero=True)
+        sim.guardar()
+        vencido.refresh_from_db(); vigente.refresh_from_db()
+        self.assertEqual((vencido.cantidad, vigente.cantidad), (0, 10))
+
+    def test_registrar_merma_ajusta_el_inventario_uc02(self):
+        self.lote(10, vence_en=5)
+        self.client.force_login(self.comprador)
+        respuesta = self.client.post(reverse("registrar_merma"), {
+            "producto": self.leche.id_producto, "fecha": self.hoy.isoformat(),
+            "cantidad": "3", "motivo": Merma.Motivo.DANO,
+        }, follow=True)
+        self.assertContains(respuesta, "descontada del inventario")
+        self.assertEqual(Inventario.objects.get().cantidad, 7)
+
+    def test_el_modo_pasillo_muestra_el_stock_despues_de_la_merma(self):
+        self.lote(10, vence_en=5)
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("registrar_merma"), {
+            "producto": self.leche.id_producto, "fecha": self.hoy.isoformat(),
+            "cantidad": "4", "motivo": Merma.Motivo.DANO,
+        })
+        ficha = self.client.get(reverse("modo_pasillo"), {"codigo": self.leche.codigo_upc})
+        self.assertEqual(ficha.context["ficha"]["stock_actual"], 6)
+
+    def test_merma_sin_stock_suficiente_se_registra_y_avisa(self):
+        self.lote(2, vence_en=5)
+        self.client.force_login(self.comprador)
+        respuesta = self.client.post(reverse("registrar_merma"), {
+            "producto": self.leche.id_producto, "fecha": self.hoy.isoformat(),
+            "cantidad": "5", "motivo": Merma.Motivo.DANO,
+        }, follow=True)
+        self.assertEqual(Merma.objects.count(), 1)
+        self.assertContains(respuesta, "solo tenía 2 u. en inventario")
+        self.assertEqual(Inventario.objects.get().cantidad, 0)
+
+    def test_reposicion_solo_pide_bajo_el_punto_de_reorden(self):
+        from core.inventario import COBERTURA_DIAS, COLCHON_SEGURIDAD
+        objetivo = 10 * COBERTURA_DIAS * COLCHON_SEGURIDAD  # demanda 10 por día
+        sim = self.simulador()
+        lote = sim.reponer(self.leche, self.hoy, demanda_diaria=10)
+        self.assertIsNotNone(lote)
+        self.assertAlmostEqual(lote.cantidad, objetivo, delta=objetivo * 0.11)
+        self.assertIsNone(sim.reponer(self.leche, self.hoy, demanda_diaria=10))  # ya cubierto
+
+    def test_reposicion_no_pide_mas_dias_de_los_que_dura_el_producto(self):
+        from core.inventario import COLCHON_SEGURIDAD
+        pan = crear_producto(nombre="Pan francés", upc="7401112230002", vida_util_dias=2)
+        sim = self.simulador()
+        lote = sim.reponer(pan, self.hoy, demanda_diaria=10)
+        self.assertLessEqual(lote.cantidad, 10 * 2 * COLCHON_SEGURIDAD * 1.1 + 1)
+
+    def test_alerta_de_vencimiento_ignora_lotes_ya_vendidos(self):
+        self.lote(0, vence_en=1)
+        call_command("generar_alertas", stdout=StringIO())
+        self.assertFalse(Alerta.objects.filter(tipo=Alerta.Tipo.VENCIMIENTO).exists())
+
+    def test_generar_datos_prueba_cuadra_entradas_salidas_y_saldo(self):
+        call_command("generar_datos_prueba", "--dias", "40", stdout=StringIO())
+        self.assertFalse(Inventario.objects.filter(cantidad__lt=0).exists())
+        for producto in Producto.objects.filter(nombre__in=["Leche entera 1L", "Banano", "Pan francés"]):
+            entro = Inventario.objects.filter(producto=producto).aggregate(s=Sum("cantidad_inicial"))["s"]
+            saldo = Inventario.objects.filter(producto=producto).aggregate(s=Sum("cantidad"))["s"]
+            vendido = Venta.objects.filter(producto=producto).aggregate(s=Sum("cantidad"))["s"]
+            mermado = Merma.objects.filter(producto=producto).aggregate(s=Sum("cantidad"))["s"] or 0
+            # Todo lo que salió (ventas + mermas) salió de algún lote.
+            self.assertAlmostEqual(entro - saldo, vendido + mermado, delta=1, msg=producto.nombre)
+
+    def test_el_stock_vigente_queda_en_dias_de_venta_razonables(self):
+        call_command("generar_datos_prueba", "--dias", "40", stdout=StringIO())
+        for producto in Producto.objects.all():
+            stock = Inventario.objects.filter(
+                producto=producto, fecha_vencimiento__gte=self.hoy,
+            ).aggregate(s=Sum("cantidad"))["s"] or 0
+            venta_7 = Venta.objects.filter(
+                producto=producto, fecha__date__gte=self.hoy - timedelta(days=7),
+            ).aggregate(s=Sum("cantidad"))["s"] or 0
+            dias = stock / (venta_7 / 7)
+            self.assertTrue(0.5 <= dias <= 6, f"{producto.nombre}: {dias:.1f} días de stock")
+
+    def test_job_nocturno_descuenta_ventas_y_es_idempotente(self):
+        Venta.objects.create(producto=self.leche, fecha=timezone.now() - timedelta(days=10),
+                             cantidad=20, precio_unitario=self.leche.precio_venta)
+        call_command("actualizar_historial_ventas", stdout=StringIO())
+        self.assertFalse(Inventario.objects.filter(cantidad__lt=0).exists())
+        lotes = Inventario.objects.count()
+        self.assertGreater(lotes, 0)
+        consumido = sum(l.cantidad_inicial - l.cantidad for l in Inventario.objects.all())
+        vendido_desde_job = Venta.objects.filter(
+            fecha__date__gte=self.hoy - timedelta(days=9)
+        ).aggregate(s=Sum("cantidad"))["s"]
+        self.assertGreater(consumido, 0)
+        self.assertLessEqual(consumido, vendido_desde_job + Merma.objects.aggregate(s=Sum("cantidad"))["s"] + 1e-6)
+        call_command("actualizar_historial_ventas", stdout=StringIO())
+        self.assertEqual(Inventario.objects.count(), lotes)
+
+    def test_migracion_0012_reconstruye_el_inventario(self):
+        from importlib import import_module
+        from django.apps import apps
+        self.lote(9999, vence_en=5)  # lote "inflado" como los de antes
+        for dias in range(14, 0, -1):
+            Venta.objects.create(producto=self.leche, fecha=timezone.now() - timedelta(days=dias),
+                                 cantidad=10, precio_unitario=self.leche.precio_venta)
+        import_module("core.migrations.0012_inventario_vivo").reconstruir(apps, None)
+        stock = Inventario.objects.filter(fecha_vencimiento__gte=self.hoy).aggregate(s=Sum("cantidad"))["s"]
+        self.assertLess(stock, 100)  # unos días de venta, no 9999
+        self.assertFalse(Inventario.objects.filter(cantidad=9999).exists())

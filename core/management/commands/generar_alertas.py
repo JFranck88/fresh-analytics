@@ -43,9 +43,12 @@ class Command(BaseCommand):
 
             # P-07A: Verificar vencimiento
             limite_venc = hoy + timedelta(days=dias_vencimiento)
+            # Solo lotes con saldo: con el inventario vivo (ventas y mermas
+            # descuentan del lote, ver core/inventario.py) un lote ya
+            # vendido completo no tiene nada que vencer.
             lotes_por_vencer = Inventario.objects.filter(
                 producto=producto, fecha_vencimiento__gte=hoy,
-                fecha_vencimiento__lte=limite_venc,
+                fecha_vencimiento__lte=limite_venc, cantidad__gt=0,
             )
             if lotes_por_vencer.exists():
                 cantidad_riesgo = lotes_por_vencer.aggregate(

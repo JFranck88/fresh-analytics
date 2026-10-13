@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from core.models import LIBRAS_POR_KILO, Producto, Venta, Inventario, Merma
 from core.clima import lluvia_sintetica
+from core.inventario import reconstruir_inventario
 
 
 # El 7mo campo de cada tupla es Producto.UnidadMedida: "UNIDAD" (se cuenta
@@ -101,9 +102,8 @@ class Command(BaseCommand):
         hoy = timezone.localdate()
         inicio = hoy - timedelta(days=dias)
 
-        ventas_bulk, mermas_bulk, inventarios_bulk = [], [], []
+        ventas_bulk, mermas_bulk = [], []
         fecha = inicio
-        dia_num = 0
 
         while fecha <= hoy:
             factor_semana = FACTOR_SEMANA[fecha.weekday()]
@@ -175,37 +175,24 @@ class Command(BaseCommand):
                         ),
                     ))
 
-            if dia_num % 3 == 0:
-                for producto in productos:
-                    cantidad_lote = producto.redondear_cantidad(
-                        demanda_base(producto) * random.uniform(2.5, 4)
-                    )
-                    inventarios_bulk.append(Inventario(
-                        producto=producto, fecha_ingreso=fecha,
-                        fecha_vencimiento=fecha + timedelta(days=producto.vida_util_dias),
-                        cantidad=cantidad_lote,
-                        lote=f"L-{fecha.strftime('%Y%m%d')}-{producto.id_producto}",
-                    ))
-
             if len(ventas_bulk) > 5000:
                 Venta.objects.bulk_create(ventas_bulk)
                 ventas_bulk = []
             if len(mermas_bulk) > 2000:
                 Merma.objects.bulk_create(mermas_bulk)
                 mermas_bulk = []
-            if len(inventarios_bulk) > 2000:
-                Inventario.objects.bulk_create(inventarios_bulk)
-                inventarios_bulk = []
 
             fecha += timedelta(days=1)
-            dia_num += 1
 
         if ventas_bulk:
             Venta.objects.bulk_create(ventas_bulk)
         if mermas_bulk:
             Merma.objects.bulk_create(mermas_bulk)
-        if inventarios_bulk:
-            Inventario.objects.bulk_create(inventarios_bulk)
+
+        # Inventario vivo (core/inventario.py): los lotes se construyen
+        # simulando la reposición día por día y descontando cada venta y
+        # merma con la regla FEFO, en vez de sumar lotes que nadie vende.
+        reconstruir_inventario(Producto, Venta, Merma, Inventario)
 
         self.stdout.write(self.style.SUCCESS(
             f"Listo: {dias} días generados para {len(productos)} productos (con efecto de lluvia)."

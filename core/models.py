@@ -115,7 +115,11 @@ class Inventario(models.Model):
     )
     fecha_ingreso = models.DateField()
     fecha_vencimiento = models.DateField()
+    # Saldo del lote: lo que todavía queda. Las ventas y las mermas lo
+    # descuentan con la regla FEFO (ver core/inventario.py).
     cantidad = models.FloatField()
+    # Lo que se recibió cuando entró el lote (no cambia).
+    cantidad_inicial = models.FloatField(null=True, blank=True)
     lote = models.CharField(max_length=50, blank=True, default="")
 
     class Meta:

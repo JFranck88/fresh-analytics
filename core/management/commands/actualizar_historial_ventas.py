@@ -11,6 +11,10 @@ temporada y lluvia), para que el historial sea estadísticamente
 consistente con el resto de los datos. Pensado para correr cada madrugada
 junto con entrenar_modelo (ver .github/workflows/entrenar_diario.yml).
 
+Además mueve el inventario (core/inventario.py): repone lotes según la
+política de reposición y descuenta las ventas y mermas generadas con la
+regla FEFO, así el stock que ven las pantallas es el saldo real.
+
 Es seguro correrlo más de una vez el mismo día o varios días seguidos: si
 el historial ya está al día, no hace nada.
 """
@@ -23,6 +27,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from core.clima import lluvia_sintetica
+from core.inventario import simular_periodo
 from core.management.commands.generar_datos_prueba import (
     FACTOR_SEMANA,
     MERMA_MINIMA_PESO,
@@ -76,6 +81,15 @@ class Command(BaseCommand):
             dias_generados += 1
             fecha += timedelta(days=1)
 
+        # Inventario vivo (core/inventario.py): cada mañana entra lo que pide
+        # la política de reposición y durante el día las ventas y mermas
+        # descuentan del lote que vence primero (FEFO). Se repone también
+        # la mañana de hoy, para que el stock del día ya esté en bodega.
+        simular_periodo(
+            productos, desde, hasta, Venta, Merma, Inventario,
+            reponer_hasta=timezone.localdate(),
+        )
+
         self.stdout.write(self.style.SUCCESS(
             f"Historial actualizado: {dias_generados} día(s) generado(s), del {desde} al {hasta}."
         ))
@@ -87,7 +101,7 @@ class Command(BaseCommand):
         llueve_ese_dia = lluvia_sintetica(fecha)
         factor_total = factor_semana * factor_quincena * factor_estacional
 
-        ventas_bulk, mermas_bulk, inventarios_bulk = [], [], []
+        ventas_bulk, mermas_bulk = [], []
 
         for producto in productos:
             base = demanda_base(producto)
@@ -144,21 +158,8 @@ class Command(BaseCommand):
                         ),
                     ))
 
-            # Reposición de inventario: un lote nuevo cada día, como en una
-            # tienda real donde el stock se repone constantemente.
-            cantidad_lote = producto.redondear_cantidad(
-                demanda_base(producto) * random.uniform(2.5, 4)
-            )
-            inventarios_bulk.append(Inventario(
-                producto=producto, fecha_ingreso=fecha,
-                fecha_vencimiento=fecha + timedelta(days=producto.vida_util_dias),
-                cantidad=cantidad_lote,
-                lote=f"L-{fecha.strftime('%Y%m%d')}-{producto.id_producto}",
-            ))
-
         if ventas_bulk:
             Venta.objects.bulk_create(ventas_bulk)
         if mermas_bulk:
             Merma.objects.bulk_create(mermas_bulk)
-        if inventarios_bulk:
-            Inventario.objects.bulk_create(inventarios_bulk)
+

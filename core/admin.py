@@ -16,7 +16,7 @@ class VentaAdmin(admin.ModelAdmin):
 
 @admin.register(Inventario)
 class InventarioAdmin(admin.ModelAdmin):
-    list_display = ("producto", "lote", "cantidad", "fecha_vencimiento")
+    list_display = ("producto", "lote", "cantidad_inicial", "cantidad", "fecha_ingreso", "fecha_vencimiento")
 
 
 @admin.register(Merma)
