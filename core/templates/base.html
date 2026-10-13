@@ -42,6 +42,10 @@
                 </a>
             {% endif %}
             {% if user.rol == "COMPRADOR" or user.rol == "GERENTE" or user.is_superuser_admin %}
+                <a href="{% url 'listar_ordenes' %}" class="sidebar-link {% if request.resolver_match.url_name == 'listar_ordenes' or request.resolver_match.url_name == 'detalle_orden' %}activo{% endif %}" title="Órdenes de compra">
+                    <i class="bi bi-receipt"></i><span class="sidebar-texto">Órdenes de compra</span>
+                    {% if ordenes_por_atender_count %}<span class="sidebar-badge">{{ ordenes_por_atender_count }}</span>{% endif %}
+                </a>
                 <a href="{% url 'historial_decisiones' %}" class="sidebar-link {% if request.resolver_match.url_name == 'historial_decisiones' %}activo{% endif %}" title="Historial de Decisiones">
                     <i class="bi bi-clock-history"></i><span class="sidebar-texto">Historial de Decisiones</span>
                 </a>

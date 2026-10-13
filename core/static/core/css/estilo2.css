@@ -869,3 +869,14 @@ a.topbar-buscador-item:hover {
     opacity: 0.5;
     transition: opacity 0.15s ease;
 }
+
+/* Órdenes de compra (UC-03 / UC-06) */
+.orden-estado { font-weight: 600; font-size: 12px; vertical-align: middle; }
+.orden-pendiente { background: #FFF3CD; color: #7A5A00; }
+.orden-rechazada { background: #F8D7DA; color: #842029; }
+.orden-aprobada { background: #D8F3DC; color: var(--bosque); }
+.orden-recibida { background: #E2E8F0; color: #334155; }
+.orden-historial { list-style: none; padding-left: 0; margin: 0; }
+.orden-evento { border-left: 3px solid #CBD5E1; padding: 4px 0 8px 12px; }
+.orden-evento-rechazada { border-left-color: #C0392B; }
+.orden-evento-aprobada, .orden-evento-recibida { border-left-color: var(--brote); }

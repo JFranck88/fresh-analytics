@@ -166,8 +166,10 @@ class ControlDeAccesoPorRolTests(TestCase):
 
     # Vistas que NO reciben argumentos de URL, agrupadas por a quién
     # deben permitirle entrar (200) y a quién deben rechazarle (403).
-    SOLO_COMPRADOR = ["registrar_merma", "listar_recomendaciones", "generar_orden_compra"]
-    COMPRADOR_Y_GERENTE = ["listar_alertas", "listar_mermas", "historial_decisiones", "riesgo_descomposicion"]
+    # generar_orden_compra salió de esta lista el 2026-10-13: ahora solo
+    # redirige a Órdenes de compra (el PDF sale de una orden aprobada).
+    SOLO_COMPRADOR = ["registrar_merma", "listar_recomendaciones"]
+    COMPRADOR_Y_GERENTE = ["listar_alertas", "listar_mermas", "historial_decisiones", "riesgo_descomposicion", "listar_ordenes"]
     SOLO_ADMINISTRADOR = ["listar_usuarios", "crear_usuario", "listar_configuracion", "mantenimiento"]
     # Módulo aparte de Predicciones (decisión de Francisco, 2026-09-18): la
     # tendencia de aprendizaje del modelo es para sustentar la tesis ante
@@ -3005,3 +3007,171 @@ class AjusteRecomendacionPesoTests(TestCase):
         respuesta = self.client.get(reverse("listar_recomendaciones"))
         self.assertContains(respuesta, f'name="ajuste_{pollo.id_producto}" class="form-control form-control-sm" style="width: 100px" value="15.5"')
         self.assertContains(respuesta, "15,50 lb")  # el texto sí lleva coma
+
+
+class OrdenCompraAprobacionTests(TestCase):
+    """UC-03 / UC-06 / RF-07 (2026-10-13): el Comprador envía la orden a
+    aprobación desde Recomendaciones; el Gerente la aprueba o la rechaza con
+    observación obligatoria; si la rechaza, el Comprador la corrige y la
+    reenvía; el PDF solo sale de una orden aprobada; al registrar la
+    recepción entran los lotes al inventario."""
+
+    def setUp(self):
+        from .models import OrdenCompra, OrdenCompraEvento
+        self.OrdenCompra, self.Evento = OrdenCompra, OrdenCompraEvento
+        self.hoy = timezone.localdate()
+        self.comprador = crear_usuario("comprador.oc@test.com", Usuario.Rol.COMPRADOR)
+        self.otro_comprador = crear_usuario("comprador2.oc@test.com", Usuario.Rol.COMPRADOR)
+        self.gerente = crear_usuario("gerente.oc@test.com", Usuario.Rol.GERENTE)
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7401112250001", precio_compra=6.0)
+        self.pollo = crear_producto(nombre="Pechuga de pollo", upc="7401112250002", precio_compra=9.07,
+                                    unidad_medida=Producto.UnidadMedida.PESO, vida_util_dias=4)
+        for producto, valor in ((self.leche, 30), (self.pollo, 20.5)):
+            Prediccion.objects.create(producto=producto, fecha_prediccion=self.hoy, fecha_pronosticada=self.hoy,
+                                      valor_predicho=valor, intervalo_inferior=valor - 5, intervalo_superior=valor + 5)
+
+    def enviar(self, leche="30", pollo="20.5"):
+        self.client.force_login(self.comprador)
+        return self.client.post(reverse("listar_recomendaciones"), {
+            "accion": "enviar", f"ajuste_{self.leche.id_producto}": leche, f"ajuste_{self.pollo.id_producto}": pollo,
+        })
+
+    def orden(self):
+        return self.OrdenCompra.objects.get()
+
+    def test_enviar_a_aprobacion_crea_orden_pendiente(self):
+        respuesta = self.enviar(leche="35")
+        orden = self.orden()
+        self.assertRedirects(respuesta, reverse("detalle_orden", args=[orden.id_orden]))
+        self.assertEqual(orden.estado, "PENDIENTE")
+        lineas = {d.producto.nombre: (d.cantidad_sugerida, d.cantidad) for d in orden.detalles.all()}
+        self.assertEqual(lineas, {"Leche entera 1L": (30, 35), "Pechuga de pollo": (20.5, 20.5)})
+        self.assertAlmostEqual(orden.total, 35 * 6 + round(20.5 * 9.07, 2))
+        # El ajuste también queda en el historial de decisiones (RF-09).
+        self.assertEqual(DecisionHistorial.objects.get().cantidad_ajustada, 35)
+
+    def test_cantidad_en_cero_sale_del_pedido(self):
+        self.enviar(pollo="0")
+        self.assertEqual([d.producto.nombre for d in self.orden().detalles.all()], ["Leche entera 1L"])
+
+    def test_todo_en_cero_no_crea_orden(self):
+        self.enviar(leche="0", pollo="")
+        self.assertFalse(self.OrdenCompra.objects.exists())
+
+    def test_guardar_ajustes_no_crea_orden(self):
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("listar_recomendaciones"), {"accion": "guardar", f"ajuste_{self.leche.id_producto}": "40"})
+        self.assertFalse(self.OrdenCompra.objects.exists())
+        self.assertEqual(DecisionHistorial.objects.count(), 1)
+
+    def test_no_se_puede_tener_dos_ordenes_abiertas(self):
+        self.enviar()
+        self.enviar()
+        self.assertEqual(self.OrdenCompra.objects.count(), 1)
+
+    def test_gerente_aprueba_y_se_habilita_el_pdf(self):
+        self.enviar()
+        orden = self.orden()
+        self.client.force_login(self.comprador)
+        self.assertEqual(self.client.get(reverse("pdf_orden", args=[orden.id_orden])).status_code, 302)  # aún no
+        self.client.force_login(self.gerente)
+        self.client.post(reverse("aprobar_orden", args=[orden.id_orden]))
+        orden.refresh_from_db()
+        self.assertEqual((orden.estado, orden.revisada_por), ("APROBADA", self.gerente))
+        pdf = self.client.get(reverse("pdf_orden", args=[orden.id_orden]))
+        self.assertEqual(pdf["Content-Type"], "application/pdf")
+        self.assertTrue(b"".join(pdf.streaming_content).startswith(b"%PDF"))
+
+    def test_rechazo_exige_observacion(self):
+        self.enviar()
+        orden = self.orden()
+        self.client.force_login(self.gerente)
+        self.client.post(reverse("rechazar_orden", args=[orden.id_orden]), {"observacion": "  "})
+        orden.refresh_from_db()
+        self.assertEqual(orden.estado, "PENDIENTE")
+
+    def test_rechazo_corregir_y_reenviar(self):
+        self.enviar(leche="35")
+        orden = self.orden()
+        self.client.force_login(self.gerente)
+        self.client.post(reverse("rechazar_orden", args=[orden.id_orden]), {"observacion": "Baja la leche a 25, hay promoción."})
+        orden.refresh_from_db()
+        self.assertEqual((orden.estado, orden.observacion), ("RECHAZADA", "Baja la leche a 25, hay promoción."))
+
+        detalle_leche = orden.detalles.get(producto=self.leche)
+        detalle_pollo = orden.detalles.get(producto=self.pollo)
+        self.client.force_login(self.comprador)
+        pagina = self.client.get(reverse("detalle_orden", args=[orden.id_orden]))
+        self.assertContains(pagina, "Baja la leche a 25")
+        self.client.post(reverse("reenviar_orden", args=[orden.id_orden]), {
+            f"cantidad_{detalle_leche.id_detalle}": "25", f"cantidad_{detalle_pollo.id_detalle}": "20.5",
+        })
+        orden.refresh_from_db()
+        self.assertEqual(orden.estado, "PENDIENTE")
+        self.assertEqual(orden.detalles.get(producto=self.leche).cantidad, 25)
+        acciones = list(orden.eventos.values_list("accion", flat=True))
+        self.assertEqual(acciones, ["ENVIADA", "RECHAZADA", "REENVIADA"])
+        self.assertIn("35 u. → 25 u.", orden.eventos.last().observacion)
+        self.assertEqual(DecisionHistorial.objects.get(producto=self.leche).cantidad_ajustada, 25)
+
+    def test_comprador_no_aprueba_y_gerente_no_reenvia(self):
+        self.enviar()
+        orden = self.orden()
+        self.client.force_login(self.comprador)
+        self.assertEqual(self.client.post(reverse("aprobar_orden", args=[orden.id_orden])).status_code, 403)
+        self.client.force_login(self.gerente)
+        self.assertEqual(self.client.post(reverse("reenviar_orden", args=[orden.id_orden])).status_code, 403)
+
+    def test_otro_comprador_no_ve_la_orden(self):
+        self.enviar()
+        self.client.force_login(self.otro_comprador)
+        self.assertEqual(self.client.get(reverse("detalle_orden", args=[self.orden().id_orden])).status_code, 403)
+        self.assertEqual(self.client.get(reverse("listar_ordenes")).context["ordenes"], [])
+
+    def test_recepcion_crea_los_lotes_en_el_inventario(self):
+        self.enviar()
+        orden = self.orden()
+        self.client.force_login(self.gerente)
+        self.client.post(reverse("aprobar_orden", args=[orden.id_orden]))
+        d_leche = orden.detalles.get(producto=self.leche)
+        d_pollo = orden.detalles.get(producto=self.pollo)
+        vence = (self.hoy + timedelta(days=9)).isoformat()
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("recibir_orden", args=[orden.id_orden]), {
+            f"recibida_{d_leche.id_detalle}": "28", f"vence_{d_leche.id_detalle}": vence,
+            f"recibida_{d_pollo.id_detalle}": "20.5", f"vence_{d_pollo.id_detalle}": "",
+        })
+        orden.refresh_from_db()
+        self.assertEqual(orden.estado, "RECIBIDA")
+        lote_leche = Inventario.objects.get(producto=self.leche)
+        self.assertEqual((lote_leche.cantidad, lote_leche.cantidad_inicial, lote_leche.fecha_vencimiento.isoformat()), (28, 28, vence))
+        lote_pollo = Inventario.objects.get(producto=self.pollo)
+        self.assertEqual(lote_pollo.fecha_vencimiento, self.hoy + timedelta(days=4))  # vida útil por defecto
+        self.assertIn("pedido 30 u., llegó 28 u.", orden.eventos.last().observacion)
+        # Y Recomendaciones ya descuenta ese stock del sugerido.
+        recomendaciones = self.client.get(reverse("listar_recomendaciones")).context["recomendaciones"]
+        sugerido_leche = next(r["sugerido"] for r in recomendaciones if r["producto_id"] == self.leche.id_producto)
+        self.assertEqual(sugerido_leche, 2)
+
+    def test_no_se_recibe_mercaderia_vencida(self):
+        self.enviar()
+        orden = self.orden()
+        self.client.force_login(self.gerente)
+        self.client.post(reverse("aprobar_orden", args=[orden.id_orden]))
+        d = orden.detalles.get(producto=self.leche)
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("recibir_orden", args=[orden.id_orden]), {
+            f"recibida_{d.id_detalle}": "30", f"vence_{d.id_detalle}": (self.hoy - timedelta(days=1)).isoformat(),
+        })
+        orden.refresh_from_db()
+        self.assertEqual(orden.estado, "APROBADA")
+        self.assertFalse(Inventario.objects.exists())
+
+    def test_badge_del_menu_avisa_al_gerente(self):
+        self.enviar()
+        self.client.force_login(self.gerente)
+        self.assertEqual(self.client.get(reverse("dashboard")).context["ordenes_por_atender_count"], 1)
+
+    def test_la_direccion_vieja_del_pdf_lleva_a_ordenes(self):
+        self.client.force_login(self.comprador)
+        self.assertRedirects(self.client.get(reverse("generar_orden_compra")), reverse("listar_ordenes"))

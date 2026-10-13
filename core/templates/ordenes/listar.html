@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block titulo %} - Órdenes de compra{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-receipt me-2"></i>Órdenes de compra</h5>
+    {% if user.rol == "COMPRADOR" or user.is_superuser_admin %}
+        <a href="{% url 'listar_recomendaciones' %}" class="btn btn-primary btn-sm"><i class="bi bi-cart-check me-1"></i>Armar orden desde Recomendaciones</a>
+    {% endif %}
+</div>
+<p class="text-muted small mb-3"><i class="bi bi-info-circle me-1"></i>
+    {% if es_gerente %}Revisa las órdenes pendientes: apruébalas para emitir el PDF al proveedor o recházalas con una observación para que el Comprador las corrija.
+    {% else %}Tus órdenes: si el Gerente rechaza una, corrígela y reenvíala; cuando esté aprobada, descarga el PDF y registra la recepción al llegar la mercadería.{% endif %}
+</p>
+
+<div class="d-flex gap-2 flex-wrap mb-3">
+    <a href="{% url 'listar_ordenes' %}" class="btn btn-sm {% if not estado_filtro %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Todas</a>
+    {% for valor, texto in estados %}
+        <a href="?estado={{ valor }}" class="btn btn-sm {% if estado_filtro == valor %}btn-secondary{% else %}btn-outline-secondary{% endif %}">{{ texto }}</a>
+    {% endfor %}
+</div>
+
+<div class="card card-tabla-movil">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0 tabla-tarjetas">
+            <thead><tr><th>Orden</th><th>Estado</th><th>Comprador</th><th>Creada</th><th>Productos</th><th>Total</th><th></th></tr></thead>
+            <tbody>
+                {% for o in ordenes %}
+                <tr>
+                    <td class="celda-titulo"><a href="{% url 'detalle_orden' o.id_orden %}">{{ o.numero }}</a></td>
+                    <td data-label="Estado">{% include "ordenes/_estado.html" with estado=o.estado %}</td>
+                    <td data-label="Comprador">{{ o.comprador.nombre }}</td>
+                    <td data-label="Creada">{{ o.fecha_creacion|date:"d/m/Y H:i" }}</td>
+                    <td data-label="Productos">{{ o.detalles.all|length }}</td>
+                    <td data-label="Total">Q {{ o.total|floatformat:2 }}</td>
+                    <td><a href="{% url 'detalle_orden' o.id_orden %}" class="btn btn-outline-secondary btn-sm">Ver</a></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>Todavía no hay órdenes{% if estado_filtro %} en este estado{% endif %}.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

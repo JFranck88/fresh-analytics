@@ -1,4 +1,3 @@
-import io
 import json
 from datetime import timedelta
 
@@ -7,7 +6,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Sum, F, Q, Avg, Max, DecimalField
 from django.db.models.functions import Coalesce, TruncDate
-from django.http import FileResponse, JsonResponse
+from django.http import JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.templatetags.static import static
 from django.urls import reverse
@@ -15,10 +14,6 @@ from django.utils.http import urlencode
 from django.views.decorators.cache import cache_control
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 
 from .decorators import rol_requerido
 from .forms import (
@@ -27,6 +22,7 @@ from .forms import (
 )
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta, DecisionHistorial
 from .inventario import descontar_merma
+from .views_ordenes import crear_orden, leer_cantidad, orden_abierta_de, registrar_decision
 from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_por_dia
 from .riesgo_descomposicion import calcular_riesgo_lote, primer_dia_que_sube_de_nivel
 
@@ -1204,46 +1200,48 @@ def listar_recomendaciones(request):
     ).first()
 
     if request.method == "POST" and fecha_max:
+        # Dos botones en el mismo formulario: "Guardar ajustes" (solo deja
+        # el historial de decisiones, RF-09) y "Enviar a aprobación"
+        # (UC-03: además arma la orden de compra para el Gerente).
+        enviar = request.POST.get("accion") == "enviar"
+        if enviar:
+            abierta = orden_abierta_de(request.user)
+            if abierta:
+                messages.error(request, (
+                    f"Ya tienes la orden {abierta.numero} en estado "
+                    f"\"{abierta.get_estado_display()}\". Termínala antes de enviar otra."
+                ))
+                return redirect("detalle_orden", id_orden=abierta.id_orden)
+
+        lineas, hubo_error = [], False
         for producto in Producto.objects.filter(activo=True):
             valor_raw = request.POST.get(f"ajuste_{producto.id_producto}")
-            if valor_raw is None or valor_raw == "":
+            if valor_raw is None or (valor_raw.strip() == "" and not enviar):
                 continue
-            try:
-                cantidad_ajustada = float(valor_raw)
-            except ValueError:
-                continue
-
             # Mismo criterio que MermaForm.clean_cantidad (ver forms.py):
             # un ajuste con decimales no tiene lógica para un producto que
             # se cuenta por pieza, solo para uno de peso variable.
-            if producto.unidad_medida != Producto.UnidadMedida.PESO and cantidad_ajustada != int(cantidad_ajustada):
-                messages.error(
-                    request,
-                    f"{producto.nombre} se maneja por unidad - el ajuste debe "
-                    "ser un número entero. No se guardó ese cambio.",
-                )
+            cantidad_ajustada, error = leer_cantidad(producto, valor_raw)
+            if error:
+                messages.error(request, f"{error} No se guardó ese cambio.")
+                hubo_error = True
                 continue
+            sugerido = calcular_cantidad_sugerida(producto, fecha_max, hoy)
+            registrar_decision(producto, request.user, fecha_max, sugerido, cantidad_ajustada)
+            lineas.append((producto, sugerido, cantidad_ajustada))
 
-            prediccion_semana = Prediccion.objects.filter(
-                producto=producto, fecha_prediccion=fecha_max
-            ).aggregate(total=Sum("valor_predicho"))["total"] or 0
-            stock_actual = Inventario.objects.filter(
-                producto=producto, fecha_vencimiento__gte=hoy
-            ).aggregate(total=Sum("cantidad"))["total"] or 0
-            sugerido = max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
-
-            if cantidad_ajustada == sugerido:
-                continue  # sin ajuste real: no vale la pena guardar historial
-
-            DecisionHistorial.objects.update_or_create(
-                producto=producto, usuario=request.user, fecha_prediccion=fecha_max,
-                defaults={
-                    "cantidad_sugerida": sugerido,
-                    "cantidad_ajustada": cantidad_ajustada,
-                },
-            )
-        messages.success(request, "Ajustes guardados en el historial de decisiones.")
-        return redirect("listar_recomendaciones")
+        if not enviar:
+            messages.success(request, "Ajustes guardados en el historial de decisiones.")
+            return redirect("listar_recomendaciones")
+        if hubo_error:
+            messages.error(request, "La orden no se envió: corrige las cantidades marcadas y vuelve a intentarlo.")
+            return redirect("listar_recomendaciones")
+        orden = crear_orden(request.user, fecha_max, lineas)
+        if orden is None:
+            messages.error(request, "La orden no se envió: todas las cantidades quedaron en 0.")
+            return redirect("listar_recomendaciones")
+        messages.success(request, f"Orden {orden.numero} enviada a aprobación del Gerente.")
+        return redirect("detalle_orden", id_orden=orden.id_orden)
 
     # ?pendientes=1 - agregado para que la tarjeta "Productos a
     # reabastecer hoy" del dashboard lleve directo a la lista filtrada a
@@ -1279,6 +1277,7 @@ def listar_recomendaciones(request):
     return render(request, "listar_recomendaciones.html", {
         "recomendaciones": recomendaciones,
         "solo_pendientes": solo_pendientes,
+        "orden_abierta": orden_abierta_de(request.user),
     })
 
 
@@ -1343,57 +1342,11 @@ def historial_decisiones(request):
 
 @rol_requerido("COMPRADOR")
 def generar_orden_compra(request):
-    hoy = timezone.localdate()
-    fecha_max = Prediccion.objects.order_by("-fecha_prediccion").values_list(
-        "fecha_prediccion", flat=True
-    ).first()
-
-    filas_por_proveedor = {}
-    for producto in Producto.objects.filter(activo=True).order_by("proveedor", "nombre"):
-        prediccion_semana = Prediccion.objects.filter(
-            producto=producto, fecha_prediccion=fecha_max
-        ).aggregate(total=Sum("valor_predicho"))["total"] or 0
-        stock_actual = Inventario.objects.filter(
-            producto=producto, fecha_vencimiento__gte=hoy
-        ).aggregate(total=Sum("cantidad"))["total"] or 0
-        sugerido = max(0, producto.redondear_cantidad(prediccion_semana - stock_actual))
-        if sugerido > 0:
-            proveedor = producto.proveedor or "Sin proveedor"
-            # Peso variable en libras (con decimal); por unidad como número
-            # entero de piezas - mismo criterio que en pantalla.
-            if producto.unidad_medida == Producto.UnidadMedida.PESO:
-                texto_cantidad = f"{sugerido:.2f} lb"
-            else:
-                texto_cantidad = f"{sugerido:.0f} u."
-            filas_por_proveedor.setdefault(proveedor, []).append(
-                [producto.codigo_upc or "—", producto.nombre, texto_cantidad]
-            )
-
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    estilos = getSampleStyleSheet()
-    elementos = [
-        Paragraph("Fresh Analytics - Orden de Compra Sugerida", estilos["Title"]),
-        Paragraph(f"Fecha: {hoy.strftime('%d/%m/%Y')}", estilos["Normal"]),
-        Spacer(1, 16),
-    ]
-
-    for proveedor, items in filas_por_proveedor.items():
-        elementos.append(Paragraph(proveedor, estilos["Heading3"]))
-        data = [["UPC", "Producto", "Cantidad sugerida"]] + items
-        tabla = Table(data, colWidths=[100, 230, 120])
-        tabla.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#212529")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ]))
-        elementos.append(tabla)
-        elementos.append(Spacer(1, 16))
-
-    doc.build(elementos)
-    buffer.seek(0)
-    return FileResponse(buffer, as_attachment=True, filename=f"orden_compra_{hoy}.pdf")
+    """Antes generaba el PDF directo desde Recomendaciones, sin pasar por el
+    Gerente. Desde 2026-10-13 el PDF sale de una orden APROBADA (UC-06,
+    paso 4): esta dirección vieja lleva a la lista de órdenes."""
+    messages.info(request, "El PDF de la orden de compra ahora se descarga desde la orden, una vez que el Gerente la aprueba.")
+    return redirect("listar_ordenes")
 
 
 @rol_requerido("ADMINISTRADOR")

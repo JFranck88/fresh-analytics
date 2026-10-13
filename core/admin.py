@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Producto, Venta, Inventario, Merma, Prediccion, Alerta, Configuracion, DecisionHistorial
+from .models import (
+    Producto, Venta, Inventario, Merma, Prediccion, Alerta, Configuracion, DecisionHistorial,
+    OrdenCompra, OrdenCompraDetalle, OrdenCompraEvento,
+)
 
 
 @admin.register(Producto)
@@ -34,4 +37,19 @@ class DecisionHistorialAdmin(admin.ModelAdmin):
     list_display = ("producto", "usuario", "fecha_decision", "cantidad_sugerida", "cantidad_ajustada")
     list_filter = ("usuario",)
 
-# Register your models here.
+
+class OrdenCompraDetalleInline(admin.TabularInline):
+    model = OrdenCompraDetalle
+    extra = 0
+
+
+class OrdenCompraEventoInline(admin.TabularInline):
+    model = OrdenCompraEvento
+    extra = 0
+
+
+@admin.register(OrdenCompra)
+class OrdenCompraAdmin(admin.ModelAdmin):
+    list_display = ("numero", "comprador", "estado", "fecha_creacion", "revisada_por")
+    list_filter = ("estado",)
+    inlines = [OrdenCompraDetalleInline, OrdenCompraEventoInline]

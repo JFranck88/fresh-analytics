@@ -368,3 +368,112 @@ class Configuracion(models.Model):
 
     def __str__(self):
         return f"{self.clave} = {self.valor}"
+
+class OrdenCompra(models.Model):
+    """UC-03 / UC-06 / RF-07: la orden de compra con su ciclo de aprobación.
+    El Comprador la arma desde Recomendaciones y la envía a aprobación; el
+    Gerente la aprueba o la rechaza con una observación obligatoria. Si la
+    rechaza, vuelve al Comprador, que corrige las cantidades y la reenvía.
+    Una vez aprobada se puede emitir el PDF para el proveedor y, cuando
+    llega la mercadería, registrar la recepción: eso crea los lotes en el
+    inventario (decisión de Francisco, 2026-10-13)."""
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "PENDIENTE", "Pendiente de aprobación"
+        RECHAZADA = "RECHAZADA", "Rechazada - por corregir"
+        APROBADA = "APROBADA", "Aprobada"
+        RECIBIDA = "RECIBIDA", "Recibida"
+
+    id_orden = models.AutoField(primary_key=True)
+    comprador = models.ForeignKey(
+        Usuario, on_delete=models.PROTECT, db_column="id_comprador",
+        related_name="ordenes_creadas",
+    )
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    fecha_prediccion = models.DateField(
+        help_text="Corrida del modelo (Prediccion.fecha_prediccion) de la que salieron las sugerencias.",
+    )
+    estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE)
+    revisada_por = models.ForeignKey(
+        Usuario, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column="id_gerente", related_name="ordenes_revisadas",
+    )
+    fecha_revision = models.DateTimeField(null=True, blank=True)
+    observacion = models.TextField(blank=True, default="", help_text="Motivo del último rechazo.")
+    recibida_por = models.ForeignKey(
+        Usuario, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column="id_receptor", related_name="ordenes_recibidas",
+    )
+    fecha_recepcion = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "orden_compra"
+        verbose_name = "Orden de compra"
+        verbose_name_plural = "Órdenes de compra"
+        ordering = ["-id_orden"]
+        indexes = [models.Index(fields=["estado"], name="idx_orden_estado")]
+
+    def __str__(self):
+        return self.numero
+
+    @property
+    def numero(self):
+        return f"OC-{self.id_orden:04d}"
+
+    @property
+    def total(self):
+        return sum(d.subtotal for d in self.detalles.all())
+
+
+class OrdenCompraDetalle(models.Model):
+    id_detalle = models.AutoField(primary_key=True)
+    orden = models.ForeignKey(
+        OrdenCompra, on_delete=models.CASCADE, db_column="id_orden", related_name="detalles",
+    )
+    producto = models.ForeignKey(Producto, on_delete=models.PROTECT, db_column="id_producto")
+    cantidad_sugerida = models.FloatField()
+    cantidad = models.FloatField(help_text="Cantidad final pedida (ajustada por el Comprador).")
+    # Precio de compra al momento de armar la orden: si después cambia el
+    # catálogo, el monto de una orden ya aprobada no debe moverse.
+    precio_compra = models.DecimalField(max_digits=10, decimal_places=2)
+    cantidad_recibida = models.FloatField(null=True, blank=True)
+    lote = models.ForeignKey(
+        Inventario, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column="id_inventario", related_name="detalle_orden",
+    )
+
+    class Meta:
+        db_table = "orden_compra_detalle"
+        unique_together = [("orden", "producto")]
+
+    @property
+    def subtotal(self):
+        return round(float(self.precio_compra) * self.cantidad, 2)
+
+
+class OrdenCompraEvento(models.Model):
+    """Bitácora de cada vuelta de la orden (enviada, rechazada con su
+    observación, reenviada, aprobada, recibida), para que el Gerente vea
+    qué se corrigió y la tesis tenga trazabilidad completa."""
+
+    class Accion(models.TextChoices):
+        ENVIADA = "ENVIADA", "Enviada a aprobación"
+        RECHAZADA = "RECHAZADA", "Rechazada"
+        REENVIADA = "REENVIADA", "Corregida y reenviada"
+        APROBADA = "APROBADA", "Aprobada"
+        RECIBIDA = "RECIBIDA", "Mercadería recibida"
+
+    id_evento = models.AutoField(primary_key=True)
+    orden = models.ForeignKey(
+        OrdenCompra, on_delete=models.CASCADE, db_column="id_orden", related_name="eventos",
+    )
+    usuario = models.ForeignKey(
+        Usuario, on_delete=models.SET_NULL, null=True, blank=True, db_column="id_usuario",
+    )
+    fecha = models.DateTimeField(auto_now_add=True)
+    accion = models.CharField(max_length=20, choices=Accion.choices)
+    observacion = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "orden_compra_evento"
+        ordering = ["fecha", "id_evento"]

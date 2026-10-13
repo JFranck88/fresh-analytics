@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block titulo %} - {{ orden.numero }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-receipt me-2"></i>Orden de compra {{ orden.numero }} {% include "ordenes/_estado.html" with estado=orden.estado %}</h5>
+    <div class="d-flex gap-2">
+        <a href="{% url 'listar_ordenes' %}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Órdenes</a>
+        {% if puede_pdf %}<a href="{% url 'pdf_orden' orden.id_orden %}" class="btn btn-primary btn-sm"><i class="bi bi-file-earmark-pdf me-1"></i>PDF para el proveedor</a>{% endif %}
+    </div>
+</div>
+<p class="text-muted small mb-3">
+    Elaborada por <strong>{{ orden.comprador.nombre }}</strong> el {{ orden.fecha_creacion|date:"d/m/Y H:i" }}
+    · sugerencias del modelo del {{ orden.fecha_prediccion|date:"d/m/Y" }}
+    {% if orden.revisada_por %}· revisada por <strong>{{ orden.revisada_por.nombre }}</strong> el {{ orden.fecha_revision|date:"d/m/Y H:i" }}{% endif %}
+</p>
+
+{% if orden.estado == "RECHAZADA" %}
+    <div class="alert alert-warning"><i class="bi bi-chat-left-text me-1"></i><strong>Observación del Gerente:</strong> {{ orden.observacion }}</div>
+{% endif %}
+
+{% if puede_corregir %}<form method="post" action="{% url 'reenviar_orden' orden.id_orden %}" id="formCorregir">{% csrf_token %}{% endif %}
+{% if puede_recibir %}<form method="post" action="{% url 'recibir_orden' orden.id_orden %}" id="formRecibir">{% csrf_token %}{% endif %}
+<div class="card card-tabla-movil mb-3">
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0 tabla-tarjetas">
+            <thead><tr>
+                <th>Proveedor</th><th>Producto</th><th>Sugerido</th><th>Pedido</th><th>Precio compra</th><th>Subtotal</th>
+                {% if puede_recibir %}<th>Llegó</th><th>Vence</th>{% elif orden.estado == "RECIBIDA" %}<th>Llegó</th><th>Lote</th>{% endif %}
+            </tr></thead>
+            <tbody>
+                {% for d in detalles %}
+                <tr>
+                    <td class="text-muted small celda-sub">{{ d.producto.proveedor|default:"Sin proveedor" }}</td>
+                    <td class="celda-titulo">{{ d.producto.nombre }}</td>
+                    <td data-label="Sugerido">{{ d.texto_sugerida }}</td>
+                    <td data-label="Pedido">
+                        {% if puede_corregir %}
+                            <input type="number" min="0" step="{% if d.producto.unidad_medida == 'PESO' %}0.01{% else %}1{% endif %}" inputmode="decimal" name="cantidad_{{ d.id_detalle }}" value="{{ d.valor_casilla }}" class="form-control form-control-sm" style="width: 110px">
+                        {% else %}
+                            <strong>{{ d.texto_cantidad }}</strong>{% if d.ajustado %} <span class="badge bg-light text-dark border" title="Ajustado por el Comprador">ajustado</span>{% endif %}
+                        {% endif %}
+                    </td>
+                    <td data-label="Precio compra">Q {{ d.precio_compra }}/{% if d.producto.unidad_medida == "PESO" %}lb{% else %}u.{% endif %}</td>
+                    <td data-label="Subtotal">Q {{ d.subtotal|floatformat:2 }}</td>
+                    {% if puede_recibir %}
+                        <td data-label="Llegó"><input type="number" min="0" step="{% if d.producto.unidad_medida == 'PESO' %}0.01{% else %}1{% endif %}" inputmode="decimal" name="recibida_{{ d.id_detalle }}" value="{{ d.valor_casilla }}" class="form-control form-control-sm" style="width: 110px"></td>
+                        <td data-label="Vence"><input type="date" name="vence_{{ d.id_detalle }}" value="{{ d.vence_sugerido|date:'Y-m-d' }}" min="{{ hoy|date:'Y-m-d' }}" class="form-control form-control-sm" style="width: 150px"></td>
+                    {% elif orden.estado == "RECIBIDA" %}
+                        <td data-label="Llegó">{{ d.texto_recibida }}</td>
+                        <td data-label="Lote" class="small">{% if d.lote %}{{ d.lote.lote }} · vence {{ d.lote.fecha_vencimiento|date:"d/m/Y" }}{% else %}—{% endif %}</td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot><tr><td colspan="5" class="text-end"><strong>Total de la orden</strong></td><td><strong>Q {{ total|floatformat:2 }}</strong></td>{% if puede_recibir or orden.estado == "RECIBIDA" %}<td colspan="2"></td>{% endif %}</tr></tfoot>
+        </table>
+    </div>
+</div>
+{% if puede_corregir %}
+    <p class="small text-muted">Corrige las cantidades según la observación del Gerente. Un producto en 0 sale del pedido.</p>
+    <button type="submit" class="btn btn-primary btn-sm mb-3"><i class="bi bi-send me-1"></i>Corregir y reenviar a aprobación</button>
+</form>
+{% endif %}
+{% if puede_recibir %}
+    <p class="small text-muted">Anota lo que realmente llegó y la fecha de vencimiento de cada lote. Al guardar, los lotes entran al inventario.</p>
+    <button type="submit" class="btn btn-primary btn-sm mb-3"><i class="bi bi-box-arrow-in-down me-1"></i>Registrar recepción</button>
+</form>
+{% endif %}
+
+{% if puede_revisar %}
+<div class="card mb-3">
+    <div class="card-body">
+        <h6 class="mb-3"><i class="bi bi-clipboard-check me-1"></i>Revisión del Gerente</h6>
+        <div class="d-flex flex-wrap gap-3 align-items-start">
+            <form method="post" action="{% url 'aprobar_orden' orden.id_orden %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-success"><i class="bi bi-check-lg me-1"></i>Aprobar orden</button>
+            </form>
+            <form method="post" action="{% url 'rechazar_orden' orden.id_orden %}" class="flex-grow-1" style="min-width: 260px">
+                {% csrf_token %}
+                <textarea name="observacion" class="form-control mb-2" rows="2" required placeholder="Observación para el Comprador (obligatoria para rechazar)"></textarea>
+                <button type="submit" class="btn btn-outline-danger"><i class="bi bi-x-lg me-1"></i>Rechazar y devolver al Comprador</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body">
+        <h6 class="mb-3"><i class="bi bi-clock-history me-1"></i>Historial de la orden</h6>
+        <ul class="orden-historial">
+            {% for e in eventos %}
+            <li class="orden-evento orden-evento-{{ e.accion|lower }}">
+                <strong>{{ e.get_accion_display }}</strong> · {{ e.usuario.nombre|default:"—" }} · {{ e.fecha|date:"d/m/Y H:i" }}
+                {% if e.observacion %}<div class="small text-muted">{{ e.observacion }}</div>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endblock %}

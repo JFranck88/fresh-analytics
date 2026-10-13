@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import views, views_ordenes
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
@@ -21,6 +21,14 @@ urlpatterns = [
     path("predicciones/aprendizaje/", views.tendencia_aprendizaje_modelo, name="tendencia_aprendizaje_modelo"),
     path("recomendaciones/", views.listar_recomendaciones, name="listar_recomendaciones"),
     path("recomendaciones/orden-compra/", views.generar_orden_compra, name="generar_orden_compra"),
+    # Órdenes de compra con aprobación del Gerente (UC-03 / UC-06 / RF-07)
+    path("ordenes/", views_ordenes.listar_ordenes, name="listar_ordenes"),
+    path("ordenes/<int:id_orden>/", views_ordenes.detalle_orden, name="detalle_orden"),
+    path("ordenes/<int:id_orden>/aprobar/", views_ordenes.aprobar_orden, name="aprobar_orden"),
+    path("ordenes/<int:id_orden>/rechazar/", views_ordenes.rechazar_orden, name="rechazar_orden"),
+    path("ordenes/<int:id_orden>/reenviar/", views_ordenes.reenviar_orden, name="reenviar_orden"),
+    path("ordenes/<int:id_orden>/recibir/", views_ordenes.recibir_orden, name="recibir_orden"),
+    path("ordenes/<int:id_orden>/pdf/", views_ordenes.pdf_orden, name="pdf_orden"),
     path("historial-decisiones/", views.historial_decisiones, name="historial_decisiones"),
     path("usuarios/", views.listar_usuarios, name="listar_usuarios"),
     path("usuarios/crear/", views.crear_usuario, name="crear_usuario"),
