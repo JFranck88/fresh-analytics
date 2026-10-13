@@ -2985,3 +2985,23 @@ class InventarioVivoTests(TestCase):
         stock = Inventario.objects.filter(fecha_vencimiento__gte=self.hoy).aggregate(s=Sum("cantidad"))["s"]
         self.assertLess(stock, 100)  # unos días de venta, no 9999
         self.assertFalse(Inventario.objects.filter(cantidad=9999).exists())
+
+
+class AjusteRecomendacionPesoTests(TestCase):
+    """Regresión (2026-10-13): la casilla Ajustar es type="number" y el
+    navegador no acepta coma decimal; con "15,50" quedaba vacía en los
+    productos por libra. El valor debe ir con punto."""
+
+    def test_casilla_ajustar_lleva_punto_decimal(self):
+        comprador = crear_usuario("comprador.ajuste@test.com", Usuario.Rol.COMPRADOR)
+        pollo = crear_producto(nombre="Pechuga de pollo", upc="7401112240001",
+                               unidad_medida=Producto.UnidadMedida.PESO)
+        hoy = timezone.localdate()
+        Prediccion.objects.create(producto=pollo, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+                                  valor_predicho=20.7, intervalo_inferior=15, intervalo_superior=25)
+        Inventario.objects.create(producto=pollo, fecha_ingreso=hoy, cantidad=5.2,
+                                  fecha_vencimiento=hoy + timedelta(days=3))
+        self.client.force_login(comprador)
+        respuesta = self.client.get(reverse("listar_recomendaciones"))
+        self.assertContains(respuesta, f'name="ajuste_{pollo.id_producto}" class="form-control form-control-sm" style="width: 100px" value="15.5"')
+        self.assertContains(respuesta, "15,50 lb")  # el texto sí lleva coma

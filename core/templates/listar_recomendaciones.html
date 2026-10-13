@@ -1,4 +1,11 @@
 {% extends "base.html" %}
+{% load l10n %}
+{% comment %}
+Las casillas Ajustar son type="number": el navegador solo acepta punto
+decimal. Con la coma de es-GT ("152,23") la casilla quedaba VACÍA en los
+productos por libra (visto por Francisco el 2026-10-13). Por eso el valor
+va con |unlocalize; el texto de las otras columnas sigue con coma.
+{% endcomment %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
     <h5 class="mb-0"><i class="bi bi-cart-check me-2"></i>Recomendación de pedidos</h5>
@@ -31,12 +38,12 @@
                         <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:2 }} lb</td>
                         <td data-label="Stock actual">{{ r.stock_actual|floatformat:2 }} lb</td>
                         <td data-label="Sugerido"><strong>{{ r.sugerido|floatformat:2 }} lb</strong></td>
-                        <td data-label="Ajustar (lb)"><input inputmode="decimal" type="number" step="0.01" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 100px" value="{{ r.sugerido }}"></td>
+                        <td data-label="Ajustar (lb)"><input inputmode="decimal" type="number" step="0.01" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 100px" value="{{ r.sugerido|unlocalize }}"></td>
                         {% else %}
                         <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:0 }} u.</td>
                         <td data-label="Stock actual">{{ r.stock_actual|floatformat:0 }} u.</td>
                         <td data-label="Sugerido"><strong>{{ r.sugerido|floatformat:0 }} u.</strong></td>
-                        <td data-label="Ajustar (u.)"><input inputmode="numeric" type="number" step="1" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 90px" value="{{ r.sugerido }}"></td>
+                        <td data-label="Ajustar (u.)"><input inputmode="numeric" type="number" step="1" min="0" name="ajuste_{{ r.producto_id }}" class="form-control form-control-sm" style="width: 90px" value="{{ r.sugerido|unlocalize }}"></td>
                         {% endif %}
                     </tr>
                     {% empty %}
