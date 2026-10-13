@@ -1,0 +1,126 @@
+{% comment %}
+Resultado del Modo pasillo (ficha, código no registrado o estado inicial).
+Se usa dentro de modo_pasillo.html y también se devuelve solo, con
+?parcial=1, cuando el escaneo se resuelve sin recargar la página.
+{% endcomment %}
+{% if not codigo %}
+    <div class="card">
+        <div class="estado-vacio">
+            <i class="bi bi-upc-scan"></i>
+            Apunta el lector al código de barras del producto en el anaquel.<br>
+            Verás su stock, el lote más próximo a vencer, el pronóstico y cuánto pedir.
+        </div>
+    </div>
+
+{% elif not ficha %}
+    <div class="card pasillo-no-encontrado">
+        <div class="card-body">
+            <p class="mb-1"><i class="bi bi-question-circle me-1"></i><strong>Código no registrado</strong></p>
+            <p class="pasillo-codigo mb-2">{{ codigo }}</p>
+            <p class="text-muted small mb-0">Ningún producto activo de Alimentos Frescos tiene este código.</p>
+
+            {% if puede_asignar_codigo %}
+                <hr>
+                <form method="post" action="{% url 'asignar_codigo_pasillo' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="codigo" value="{{ codigo }}">
+                    <label for="productoAsignar" class="form-label small mb-1">Asignar este código a un producto del catálogo:</label>
+                    <select name="producto" id="productoAsignar" class="form-select mb-2" required>
+                        <option value="">Selecciona el producto…</option>
+                        {% for p in productos_para_asignar %}
+                            <option value="{{ p.id_producto }}">{{ p.nombre }}{% if p.codigo_upc %} (hoy: {{ p.codigo_upc }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-primary w-100"><i class="bi bi-link-45deg me-1"></i>Asignar código</button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+
+{% else %}
+    {% with p=ficha.producto %}
+    <div class="card pasillo-ficha">
+        <div class="card-body">
+            <div class="pasillo-ficha-cabecera">
+                <h4 class="mb-0">{{ p.nombre }}</h4>
+                <span class="text-muted small">{{ p.codigo_upc }} · {{ p.get_categoria_display }} · {% if ficha.es_peso %}peso variable (kg){% else %}por unidad{% endif %}</span>
+            </div>
+
+            <div class="pasillo-datos">
+                <div class="pasillo-dato">
+                    <span class="pasillo-dato-etiqueta">Stock vigente</span>
+                    <span class="pasillo-dato-valor">{% if ficha.es_peso %}{{ ficha.stock_actual|floatformat:2 }} kg{% else %}{{ ficha.stock_actual|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-nota">{{ ficha.num_lotes }} lote{{ ficha.num_lotes|pluralize }}</span>
+                </div>
+                <div class="pasillo-dato">
+                    <span class="pasillo-dato-etiqueta">Venta esperada hoy</span>
+                    <span class="pasillo-dato-valor">{% if ficha.venta_hoy is None %}—{% elif ficha.es_peso %}{{ ficha.venta_hoy|floatformat:2 }} kg{% else %}{{ ficha.venta_hoy|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-nota">pronóstico Prophet</span>
+                </div>
+                <div class="pasillo-dato">
+                    <span class="pasillo-dato-etiqueta">Próximos 7 días</span>
+                    <span class="pasillo-dato-valor">{% if ficha.venta_semana is None %}—{% elif ficha.es_peso %}{{ ficha.venta_semana|floatformat:2 }} kg{% else %}{{ ficha.venta_semana|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-nota">venta esperada</span>
+                </div>
+                <div class="pasillo-dato pasillo-dato-destacado">
+                    <span class="pasillo-dato-etiqueta">Sugerido pedir</span>
+                    <span class="pasillo-dato-valor">{% if ficha.sugerido is None %}—{% elif ficha.es_peso %}{{ ficha.sugerido|floatformat:2 }} kg{% else %}{{ ficha.sugerido|floatformat:0 }} u.{% endif %}</span>
+                    <span class="pasillo-dato-nota">{% if ficha.sugerido %}hay que reabastecer{% elif ficha.sugerido is not None %}stock suficiente{% endif %}</span>
+                </div>
+            </div>
+
+            {% if ficha.proximo_vencimiento %}
+                {% with v=ficha.proximo_vencimiento %}
+                <div class="pasillo-bloque {% if v.urgente %}pasillo-bloque-urgente{% endif %}">
+                    <i class="bi bi-hourglass-split"></i>
+                    <div>
+                        <strong>Lote más próximo a vencer:</strong>
+                        {% if v.dias_restantes == 0 %}vence <strong>hoy</strong>{% elif v.dias_restantes == 1 %}vence <strong>mañana</strong>{% else %}vence el {{ v.dia_semana }} {{ v.fecha|date:"d/m" }} (en {{ v.dias_restantes }} días){% endif %}
+                        · {% if ficha.es_peso %}{{ v.cantidad|floatformat:2 }} kg{% else %}{{ v.cantidad|floatformat:0 }} u.{% endif %}
+                        {% if v.lote %}<span class="text-muted small d-block">Lote {{ v.lote }}</span>{% endif %}
+                    </div>
+                </div>
+                {% endwith %}
+            {% else %}
+                <div class="pasillo-bloque">
+                    <i class="bi bi-box-seam"></i>
+                    <div>Sin lotes vigentes en inventario.</div>
+                </div>
+            {% endif %}
+
+            {% if ficha.riesgo %}
+                <div class="pasillo-bloque">
+                    <i class="bi bi-thermometer-sun"></i>
+                    <div>
+                        <strong>Riesgo climático:</strong>
+                        <span class="badge bg-{{ ficha.riesgo.badge }}">{{ ficha.riesgo.nivel }}</span>
+                        · {{ ficha.riesgo.porcentaje_vida_util }}% de su vida útil
+                        {% if ficha.riesgo.aviso_proyeccion %}<span class="d-block small text-warning-emphasis">⚠️ {{ ficha.riesgo.aviso_proyeccion }}</span>{% endif %}
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if ficha.alertas %}
+                <div class="pasillo-alertas">
+                    {% for a in ficha.alertas %}
+                        <div class="pasillo-alerta">
+                            <span class="badge bg-{{ a.nivel }}">&nbsp;</span>
+                            <span><strong>{{ a.tipo }}:</strong> {{ a.mensaje }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <div class="pasillo-acciones">
+                {% if puede_registrar_merma %}
+                    <a href="{% url 'registrar_merma' %}?producto={{ p.id_producto }}&volver=pasillo" class="btn btn-outline-danger"><i class="bi bi-recycle me-1"></i>Registrar merma</a>
+                {% endif %}
+                <a href="{% url 'listar_predicciones' %}?producto={{ p.id_producto }}" class="btn btn-outline-secondary"><i class="bi bi-graph-up-arrow me-1"></i>Ver pronóstico</a>
+            </div>
+            {% if ficha.fecha_corrida %}
+                <p class="text-muted small mt-2 mb-0">Modelo actualizado: {{ ficha.fecha_corrida|date:"d/m/Y" }}</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endwith %}
+{% endif %}

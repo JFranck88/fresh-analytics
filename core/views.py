@@ -1590,13 +1590,19 @@ def modo_pasillo(request):
         if codigo and not producto and es_admin else []
     )
 
-    return render(request, "modo_pasillo.html", {
+    contexto = {
         "codigo": codigo,
         "ficha": ficha_pasillo(producto, hoy) if producto else None,
         "puede_registrar_merma": request.user.rol == "COMPRADOR" or request.user.is_superuser_admin,
         "puede_asignar_codigo": es_admin,
         "productos_para_asignar": productos_para_asignar,
-    })
+    }
+    # ?parcial=1: solo la ficha, para el escaneo sin recargar la página.
+    # En la T60 recargar haría perder el foco de la casilla, y el lector
+    # solo vuelve a escribir cuando la persona la toca otra vez.
+    if request.GET.get("parcial") == "1":
+        return render(request, "pasillo/_resultado.html", contexto)
+    return render(request, "modo_pasillo.html", contexto)
 
 
 def _url_pasillo(codigo):

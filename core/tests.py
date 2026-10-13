@@ -2603,3 +2603,39 @@ class ModoPasilloTests(TestCase):
         self.assertEqual(ficha["riesgo"]["porcentaje_vida_util"], 40)
         # La leche (Lácteos) no consulta el clima ni muestra riesgo.
         self.assertIsNone(self.escanear("7401234567890").context["ficha"]["riesgo"])
+
+
+class ModoPasilloEscaneoSinRecargarTests(TestCase):
+    """Prueba real en la T60 (2026-10-13): el lector solo escribe después de
+    que la persona toca la casilla, y una recarga de página le quita el
+    foco. Por eso cada escaneo pide solo la ficha (?parcial=1) y la página
+    no se recarga."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.leche = crear_producto("Leche entera 1L", upc="7401234567890")
+        self.client.force_login(self.comprador)
+
+    def test_parcial_devuelve_solo_la_ficha(self):
+        respuesta = self.client.get(reverse("modo_pasillo"), {"codigo": "7401234567890", "parcial": "1"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, "Leche entera 1L")
+        self.assertNotContains(respuesta, "<html")            # sin página completa
+        self.assertNotContains(respuesta, "inputCodigoPasillo")  # ni la casilla de escaneo
+
+    def test_parcial_de_codigo_desconocido(self):
+        respuesta = self.client.get(reverse("modo_pasillo"), {"codigo": "123", "parcial": "1"})
+        self.assertContains(respuesta, "Código no registrado")
+        self.assertNotContains(respuesta, "<html")
+
+    def test_la_pagina_completa_trae_la_casilla_y_el_aviso_del_lector(self):
+        respuesta = self.client.get(reverse("modo_pasillo"))
+        self.assertContains(respuesta, 'id="inputCodigoPasillo"')
+        self.assertContains(respuesta, "Toca la casilla para activar el lector")
+        self.assertContains(respuesta, 'id="resultadoPasillo"')
+
+    def test_parcial_con_sesion_vencida_redirige_al_login(self):
+        self.client.logout()
+        respuesta = self.client.get(reverse("modo_pasillo"), {"codigo": "7401234567890", "parcial": "1"})
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse("login"), respuesta.url)

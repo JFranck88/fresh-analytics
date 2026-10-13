@@ -2,183 +2,95 @@
 {% block titulo %} - Modo pasillo{% endblock %}
 {% block content %}
 <div class="pasillo">
-    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
-        <h5 class="mb-0"><i class="bi bi-upc-scan me-2"></i>Modo pasillo</h5>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnTecladoPasillo" aria-pressed="false">
-            <i class="bi bi-keyboard me-1"></i><span>Mostrar teclado</span>
-        </button>
-    </div>
+    <h5 class="mb-2"><i class="bi bi-upc-scan me-2"></i>Modo pasillo</h5>
 
-    {# GET normal: el lector de la T60 escribe el código y manda Enter. #}
-    <form method="get" action="{% url 'modo_pasillo' %}" id="formPasillo" class="pasillo-escaner mb-3" autocomplete="off">
+    {# El lector de la T60 escribe el código en la casilla y manda Enter. #}
+    {# Sin JavaScript es un GET normal; con JavaScript el resultado se trae #}
+    {# sin recargar la página (ver el script de abajo). #}
+    <form method="get" action="{% url 'modo_pasillo' %}" id="formPasillo" class="pasillo-escaner" autocomplete="off">
         <i class="bi bi-upc-scan pasillo-escaner-icono"></i>
         <input type="text" name="codigo" id="inputCodigoPasillo" value=""
                placeholder="Escanea el producto" aria-label="Código del producto"
-               inputmode="none" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+               inputmode="numeric" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
         <button type="submit" class="btn btn-primary">Buscar</button>
     </form>
+    <p class="pasillo-estado-lector" id="estadoLectorPasillo" aria-live="polite">
+        <i class="bi bi-hand-index"></i> Toca la casilla para activar el lector
+    </p>
 
-    {% if not codigo %}
-        <div class="card">
-            <div class="estado-vacio">
-                <i class="bi bi-upc-scan"></i>
-                Apunta el lector al código de barras del producto en el anaquel.<br>
-                Verás su stock, el lote más próximo a vencer, el pronóstico y cuánto pedir.
-            </div>
-        </div>
-
-    {% elif not ficha %}
-        <div class="card pasillo-no-encontrado">
-            <div class="card-body">
-                <p class="mb-1"><i class="bi bi-question-circle me-1"></i><strong>Código no registrado</strong></p>
-                <p class="pasillo-codigo mb-2">{{ codigo }}</p>
-                <p class="text-muted small mb-0">Ningún producto activo de Alimentos Frescos tiene este código.</p>
-
-                {% if puede_asignar_codigo %}
-                    <hr>
-                    <form method="post" action="{% url 'asignar_codigo_pasillo' %}">
-                        {% csrf_token %}
-                        <input type="hidden" name="codigo" value="{{ codigo }}">
-                        <label for="productoAsignar" class="form-label small mb-1">Asignar este código a un producto del catálogo:</label>
-                        <select name="producto" id="productoAsignar" class="form-select mb-2" required>
-                            <option value="">Selecciona el producto…</option>
-                            {% for p in productos_para_asignar %}
-                                <option value="{{ p.id_producto }}">{{ p.nombre }}{% if p.codigo_upc %} (hoy: {{ p.codigo_upc }}){% endif %}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" class="btn btn-primary w-100"><i class="bi bi-link-45deg me-1"></i>Asignar código</button>
-                    </form>
-                {% endif %}
-            </div>
-        </div>
-
-    {% else %}
-        {% with p=ficha.producto %}
-        <div class="card pasillo-ficha">
-            <div class="card-body">
-                <div class="pasillo-ficha-cabecera">
-                    <h4 class="mb-0">{{ p.nombre }}</h4>
-                    <span class="text-muted small">{{ p.codigo_upc }} · {{ p.get_categoria_display }} · {% if ficha.es_peso %}peso variable (kg){% else %}por unidad{% endif %}</span>
-                </div>
-
-                <div class="pasillo-datos">
-                    <div class="pasillo-dato">
-                        <span class="pasillo-dato-etiqueta">Stock vigente</span>
-                        <span class="pasillo-dato-valor">{% if ficha.es_peso %}{{ ficha.stock_actual|floatformat:2 }} kg{% else %}{{ ficha.stock_actual|floatformat:0 }} u.{% endif %}</span>
-                        <span class="pasillo-dato-nota">{{ ficha.num_lotes }} lote{{ ficha.num_lotes|pluralize }}</span>
-                    </div>
-                    <div class="pasillo-dato">
-                        <span class="pasillo-dato-etiqueta">Venta esperada hoy</span>
-                        <span class="pasillo-dato-valor">{% if ficha.venta_hoy is None %}—{% elif ficha.es_peso %}{{ ficha.venta_hoy|floatformat:2 }} kg{% else %}{{ ficha.venta_hoy|floatformat:0 }} u.{% endif %}</span>
-                        <span class="pasillo-dato-nota">pronóstico Prophet</span>
-                    </div>
-                    <div class="pasillo-dato">
-                        <span class="pasillo-dato-etiqueta">Próximos 7 días</span>
-                        <span class="pasillo-dato-valor">{% if ficha.venta_semana is None %}—{% elif ficha.es_peso %}{{ ficha.venta_semana|floatformat:2 }} kg{% else %}{{ ficha.venta_semana|floatformat:0 }} u.{% endif %}</span>
-                        <span class="pasillo-dato-nota">venta esperada</span>
-                    </div>
-                    <div class="pasillo-dato pasillo-dato-destacado">
-                        <span class="pasillo-dato-etiqueta">Sugerido pedir</span>
-                        <span class="pasillo-dato-valor">{% if ficha.sugerido is None %}—{% elif ficha.es_peso %}{{ ficha.sugerido|floatformat:2 }} kg{% else %}{{ ficha.sugerido|floatformat:0 }} u.{% endif %}</span>
-                        <span class="pasillo-dato-nota">{% if ficha.sugerido %}hay que reabastecer{% elif ficha.sugerido is not None %}stock suficiente{% endif %}</span>
-                    </div>
-                </div>
-
-                {% if ficha.proximo_vencimiento %}
-                    {% with v=ficha.proximo_vencimiento %}
-                    <div class="pasillo-bloque {% if v.urgente %}pasillo-bloque-urgente{% endif %}">
-                        <i class="bi bi-hourglass-split"></i>
-                        <div>
-                            <strong>Lote más próximo a vencer:</strong>
-                            {% if v.dias_restantes == 0 %}vence <strong>hoy</strong>{% elif v.dias_restantes == 1 %}vence <strong>mañana</strong>{% else %}vence el {{ v.dia_semana }} {{ v.fecha|date:"d/m" }} (en {{ v.dias_restantes }} días){% endif %}
-                            · {% if ficha.es_peso %}{{ v.cantidad|floatformat:2 }} kg{% else %}{{ v.cantidad|floatformat:0 }} u.{% endif %}
-                            {% if v.lote %}<span class="text-muted small d-block">Lote {{ v.lote }}</span>{% endif %}
-                        </div>
-                    </div>
-                    {% endwith %}
-                {% else %}
-                    <div class="pasillo-bloque">
-                        <i class="bi bi-box-seam"></i>
-                        <div>Sin lotes vigentes en inventario.</div>
-                    </div>
-                {% endif %}
-
-                {% if ficha.riesgo %}
-                    <div class="pasillo-bloque">
-                        <i class="bi bi-thermometer-sun"></i>
-                        <div>
-                            <strong>Riesgo climático:</strong>
-                            <span class="badge bg-{{ ficha.riesgo.badge }}">{{ ficha.riesgo.nivel }}</span>
-                            · {{ ficha.riesgo.porcentaje_vida_util }}% de su vida útil
-                            {% if ficha.riesgo.aviso_proyeccion %}<span class="d-block small text-warning-emphasis">⚠️ {{ ficha.riesgo.aviso_proyeccion }}</span>{% endif %}
-                        </div>
-                    </div>
-                {% endif %}
-
-                {% if ficha.alertas %}
-                    <div class="pasillo-alertas">
-                        {% for a in ficha.alertas %}
-                            <div class="pasillo-alerta">
-                                <span class="badge bg-{{ a.nivel }}">&nbsp;</span>
-                                <span><strong>{{ a.tipo }}:</strong> {{ a.mensaje }}</span>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
-
-                <div class="pasillo-acciones">
-                    {% if puede_registrar_merma %}
-                        <a href="{% url 'registrar_merma' %}?producto={{ p.id_producto }}&volver=pasillo" class="btn btn-outline-danger"><i class="bi bi-recycle me-1"></i>Registrar merma</a>
-                    {% endif %}
-                    <a href="{% url 'listar_predicciones' %}?producto={{ p.id_producto }}" class="btn btn-outline-secondary"><i class="bi bi-graph-up-arrow me-1"></i>Ver pronóstico</a>
-                </div>
-                {% if ficha.fecha_corrida %}
-                    <p class="text-muted small mt-2 mb-0">Modelo actualizado: {{ ficha.fecha_corrida|date:"d/m/Y" }}</p>
-                {% endif %}
-            </div>
-        </div>
-        {% endwith %}
-    {% endif %}
+    <div id="resultadoPasillo" class="pasillo-resultado">
+        {% include "pasillo/_resultado.html" %}
+    </div>
 </div>
 
 <script>
-    // El lector de la T60 escribe en la casilla que tenga el cursor, así que
-    // la casilla debe estar siempre enfocada. Por defecto se oculta el
-    // teclado en pantalla (inputmode="none") para que no tape la ficha; el
-    // botón "Mostrar teclado" lo habilita para escribir un código a mano.
+    // Prueba en la Generalscan T60 (2026-10-13): el lector solo escribe en
+    // la casilla después de que la persona la TOCA - el cursor puesto por la
+    // página (autofocus) no basta en Android para "conectar" el teclado del
+    // lector. Por eso, una vez tocada, la casilla nunca debe perder el foco:
+    // cada escaneo se resuelve con fetch y solo se reemplaza la ficha, sin
+    // recargar la página. Así se toca una sola vez y se escanea producto
+    // tras producto. Sin JavaScript, el formulario sigue funcionando como un
+    // GET normal (recargando la página).
     (function () {
         var form = document.getElementById('formPasillo');
         var input = document.getElementById('inputCodigoPasillo');
-        var boton = document.getElementById('btnTecladoPasillo');
-        var CLAVE = 'fas_pasillo_teclado';
-        var mostrar = false;
-        try { mostrar = localStorage.getItem(CLAVE) === '1'; } catch (e) { /* sin almacenamiento: teclado oculto */ }
+        var estado = document.getElementById('estadoLectorPasillo');
+        var resultado = document.getElementById('resultadoPasillo');
+        var urlPasillo = form.getAttribute('action');
+        var urlLogin = '{% url "login" %}';
+        var pendiente = null;
 
-        function aplicar() {
-            input.setAttribute('inputmode', mostrar ? 'numeric' : 'none');
-            boton.setAttribute('aria-pressed', mostrar ? 'true' : 'false');
-            boton.querySelector('span').textContent = mostrar ? 'Ocultar teclado' : 'Mostrar teclado';
+        function marcarEstado() {
+            var activo = document.activeElement === input;
+            form.classList.toggle('activo', activo);
+            estado.classList.toggle('activo', activo);
+            estado.innerHTML = activo
+                ? '<i class="bi bi-check-circle"></i> Lector listo: escanea un producto'
+                : '<i class="bi bi-hand-index"></i> Toca la casilla para activar el lector';
         }
-        function enfocar() {
-            if (document.activeElement !== input) input.focus({ preventScroll: true });
-        }
+        input.addEventListener('focus', marcarEstado);
+        input.addEventListener('blur', marcarEstado);
+        marcarEstado();
 
-        aplicar();
-        boton.addEventListener('click', function () {
-            mostrar = !mostrar;
-            try { localStorage.setItem(CLAVE, mostrar ? '1' : '0'); } catch (e) { /* no-op */ }
-            aplicar();
-            input.blur();
-            enfocar();
-        });
-        window.addEventListener('load', enfocar);
-        // Un toque en cualquier parte "vacía" de la pantalla devuelve el
-        // cursor a la casilla, listo para el siguiente escaneo.
-        document.addEventListener('click', function (e) {
-            if (!e.target.closest('a, button, input, select, textarea, label, .sidebar, .topbar')) enfocar();
-        });
         form.addEventListener('submit', function (e) {
-            if (!input.value.trim()) e.preventDefault();
+            e.preventDefault();
+            var codigo = input.value.trim();
+            if (!codigo) return;
+            input.value = '';           // listo para el siguiente escaneo
+            input.focus();              // el foco NO se pierde
+            if (pendiente) pendiente.abort();
+            pendiente = new AbortController();
+            resultado.classList.add('cargando');
+
+            var params = new URLSearchParams({ codigo: codigo, parcial: '1' });
+            fetch(urlPasillo + '?' + params.toString(), {
+                credentials: 'same-origin', signal: pendiente.signal,
+            })
+                .then(function (r) {
+                    // La sesión venció (1 hora sin actividad): el servidor
+                    // redirige al login; se lleva a la persona hasta allá.
+                    if (r.redirected && r.url.indexOf(urlLogin) !== -1) {
+                        window.location.href = r.url;
+                        return null;
+                    }
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.text();
+                })
+                .then(function (html) {
+                    if (html === null) return;
+                    resultado.innerHTML = html;
+                    history.replaceState(null, '', urlPasillo + '?' + new URLSearchParams({ codigo: codigo }).toString());
+                })
+                .catch(function (err) {
+                    if (err.name === 'AbortError') return;
+                    resultado.innerHTML = '<div class="alert alert-warning">No se pudo consultar el código <strong>'
+                        + codigo.replace(/[<>&"]/g, '') + '</strong>. Revisa la conexión y vuelve a escanear.</div>';
+                })
+                .finally(function () {
+                    resultado.classList.remove('cargando');
+                    window.scrollTo({ top: 0 });
+                });
         });
     })();
 </script>

@@ -848,3 +848,24 @@ a.topbar-buscador-item:hover {
 .pasillo-acciones .btn:only-child {
     grid-column: 1 / -1;
 }
+
+/* Estado del lector en el Modo pasillo: en la T60 hay que tocar la casilla
+   una vez para que el lector pueda escribir. Se le indica a la persona si
+   ya está listo o si falta ese toque. */
+.pasillo-escaner.activo {
+    border-color: var(--bosque);
+    box-shadow: 0 0 0 4px rgba(82, 183, 136, 0.25);
+}
+.pasillo-estado-lector {
+    font-size: 13.5px;
+    color: #C08500;
+    margin: 6px 0 12px 4px;
+}
+.pasillo-estado-lector.activo {
+    color: var(--bosque);
+    font-weight: 600;
+}
+.pasillo-resultado.cargando {
+    opacity: 0.5;
+    transition: opacity 0.15s ease;
+}
