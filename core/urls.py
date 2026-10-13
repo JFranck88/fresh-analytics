@@ -10,6 +10,7 @@ urlpatterns = [
     path("buscar/", views.buscar_global, name="buscar_global"),
     path("pasillo/", views.modo_pasillo, name="modo_pasillo"),
     path("pasillo/asignar-codigo/", views.asignar_codigo_pasillo, name="asignar_codigo_pasillo"),
+    path("pasillo/etiquetas.pdf", views.etiquetas_pdf, name="etiquetas_pdf"),
     path("buscar/json/", views.buscar_global_json, name="buscar_global_json"),
     path("productos/buscar-json/", views.buscar_productos_json, name="buscar_productos_json"),
     path("mermas/registrar/", views.registrar_merma, name="registrar_merma"),

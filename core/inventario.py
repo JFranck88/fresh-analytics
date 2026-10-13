@@ -62,12 +62,14 @@ class SimuladorInventario:
     """Lleva los lotes en memoria, descuenta salidas FEFO, repone y al final
     guarda todo en la base con pocas consultas."""
 
-    def __init__(self, Inventario, rng=None):
+    def __init__(self, Inventario, rng=None, Merma=None):
         self.Inventario = Inventario
+        self.Merma = Merma
         self.rng = rng or random
         self.lotes = defaultdict(list)
         self.nuevos = []
         self.modificados = {}
+        self.mermas_nuevas = []
 
     def cargar(self, producto_ids, desde):
         """Trae de la base los lotes con saldo que siguen vigentes en
@@ -148,7 +150,32 @@ class SimuladorInventario:
         for pid, lotes in self.lotes.items():
             self.lotes[pid] = [l for l in lotes if l.cantidad > 0 and l.fecha_vencimiento >= limite]
 
+    def dar_de_baja_vencidos(self, producto, fecha, vencidos_desde=None):
+        """Lo que venció sin venderse sale del inventario como merma por
+        VENCIMIENTO, igual que en el súper cuando se retira el producto
+        vencido del anaquel. Se registra al día siguiente de vencer, con
+        el costo de lo que se perdió, y marcada como automática.
+        `vencidos_desde` limita a los lotes que vencieron desde esa fecha:
+        el job nocturno solo da de baja lo del periodo que simula, para no
+        llenar de golpe el historial con sobrantes viejos de antes de que
+        existiera esta regla."""
+        for lote in self.lotes[producto.id_producto]:
+            if vencidos_desde and lote.fecha_vencimiento < vencidos_desde:
+                continue
+            if lote.cantidad > 0 and lote.fecha_vencimiento < fecha:
+                cantidad = lote.cantidad
+                self.mermas_nuevas.append(self.Merma(
+                    producto_id=producto.id_producto, fecha=lote.fecha_vencimiento + timedelta(days=1),
+                    cantidad=cantidad, motivo="VENCIMIENTO", automatica=True,
+                    costo_perdida=round(cantidad * float(producto.precio_compra), 2),
+                ))
+                lote.cantidad = 0
+                self._marcar(lote)
+
     def guardar(self):
+        if self.mermas_nuevas:
+            self.Merma.objects.bulk_create(self.mermas_nuevas, batch_size=LOTE_BD)
+            self.mermas_nuevas = []
         if self.nuevos:
             self.Inventario.objects.bulk_create(self.nuevos, batch_size=LOTE_BD)
         if self.modificados:
@@ -172,12 +199,17 @@ def _ventas_por_dia(Venta, producto_ids, desde, hasta):
     return totales
 
 
-def _mermas_por_dia(Merma, producto_ids, desde, hasta):
-    """{(producto_id, fecha): [(cantidad, motivo), ...]}."""
+def _mermas_por_dia(Merma, producto_ids, desde, hasta, excluir_automaticas=False):
+    """{(producto_id, fecha): [(cantidad, motivo), ...]}. Las mermas
+    automáticas por vencimiento no se vuelven a descontar: cuando se
+    crearon, el lote ya quedó en 0."""
     mermas = defaultdict(list)
     qs = Merma.objects.filter(
         producto_id__in=list(producto_ids), fecha__gte=desde, fecha__lte=hasta,
-    ).order_by("id_merma").values_list("producto_id", "fecha", "cantidad", "motivo")
+    )
+    if excluir_automaticas:
+        qs = qs.filter(automatica=False)
+    qs = qs.order_by("id_merma").values_list("producto_id", "fecha", "cantidad", "motivo")
     for pid, fecha, cantidad, motivo in qs.iterator(chunk_size=LOTE_BD):
         mermas[(pid, fecha)].append((cantidad, motivo))
     return mermas
@@ -197,21 +229,25 @@ def demanda_de_referencia(ventas, producto_id, fecha, inicio=None):
 
 
 def simular_periodo(productos, desde, hasta, Venta, Merma, Inventario, reponer_hasta=None, rng=None,
-                    inicio_historial=None):
-    """Recorre los días `desde`..`hasta`: cada mañana repone, durante el día
-    descuenta las ventas y las mermas registradas. Si se pasa
-    `reponer_hasta` (normalmente hoy), repone también esas mañanas sin
-    descontar ventas, que todavía no ocurren. Guarda al final."""
+                    inicio_historial=None, dar_de_baja_vencidos=False):
+    """Recorre los días `desde`..`hasta`: cada mañana da de baja lo vencido
+    (si `dar_de_baja_vencidos`) y repone; durante el día descuenta las
+    ventas y las mermas registradas. Si se pasa `reponer_hasta`
+    (normalmente hoy), hace también esas mañanas sin descontar ventas,
+    que todavía no ocurren. Guarda al final."""
     productos = list(productos)
     ids = [p.id_producto for p in productos]
-    sim = SimuladorInventario(Inventario, rng=rng)
+    sim = SimuladorInventario(Inventario, rng=rng, Merma=Merma)
     sim.cargar(ids, desde)
     ventas = _ventas_por_dia(Venta, ids, desde - timedelta(days=DIAS_DEMANDA_REFERENCIA), hasta)
-    mermas = _mermas_por_dia(Merma, ids, desde, hasta)
+    mermas = _mermas_por_dia(Merma, ids, desde, hasta, excluir_automaticas=dar_de_baja_vencidos)
+    vencidos_desde = None if inicio_historial else desde - timedelta(days=1)
 
     fecha = desde
     while fecha <= hasta:
         for p in productos:
+            if dar_de_baja_vencidos:
+                sim.dar_de_baja_vencidos(p, fecha, vencidos_desde)
             demanda = demanda_de_referencia(ventas, p.id_producto, fecha, inicio_historial)
             if demanda <= 0:
                 # Arranque del historial: todavía no hay 7 días previos.
@@ -229,18 +265,26 @@ def simular_periodo(productos, desde, hasta, Venta, Merma, Inventario, reponer_h
     if reponer_hasta:
         while fecha <= reponer_hasta:
             for p in productos:
+                if dar_de_baja_vencidos:
+                    sim.dar_de_baja_vencidos(p, fecha, vencidos_desde)
                 sim.reponer(p, fecha, demanda_de_referencia(ventas, p.id_producto, fecha))
             fecha += timedelta(days=1)
     sim.guardar()
     return sim
 
 
-def reconstruir_inventario(Producto, Venta, Merma, Inventario, hoy=None, semilla=2026):
+def reconstruir_inventario(Producto, Venta, Merma, Inventario, hoy=None, semilla=2026,
+                           dar_de_baja_vencidos=False):
     """Borra los lotes y los vuelve a construir desde la primera venta,
     simulando la reposición y descontando cada venta y merma registrada.
-    Se usa una semilla fija para que el resultado sea reproducible."""
+    Se usa una semilla fija para que el resultado sea reproducible.
+    Con `dar_de_baja_vencidos`, primero borra las mermas automáticas (se
+    vuelven a generar en la simulación). La migración 0012 lo llama sin
+    esa opción, porque su modelo histórico de Merma no tiene ese campo."""
     hoy = hoy or timezone.localdate()
     Inventario.objects.all().delete()
+    if dar_de_baja_vencidos:
+        Merma.objects.filter(automatica=True).delete()
     primera = Venta.objects.order_by("fecha").values_list("fecha", flat=True).first()
     if primera is None:
         return None
@@ -251,6 +295,7 @@ def reconstruir_inventario(Producto, Venta, Merma, Inventario, hoy=None, semilla
     return simular_periodo(
         productos, desde, hasta, Venta, Merma, Inventario,
         reponer_hasta=hoy, rng=random.Random(semilla), inicio_historial=desde,
+        dar_de_baja_vencidos=dar_de_baja_vencidos,
     )
 
 

@@ -32,7 +32,7 @@
         {% else %}
             <div class="estado-vacio">
                 <i class="bi bi-check-circle"></i>
-                {% if tipo_filtro %}Todo en orden. No hay alertas de {{ tipo_filtro_texto|lower }} en este momento.{% else %}Todo en orden. No hay alertas activas en este momento.{% endif %}
+                {% if tipo_filtro %}Todo en orden. No hay alertas de {{ tipo_filtro_texto|lower }} en este momento.{% else %}Estado general óptimo: no hay alertas activas en este momento.{% endif %}
             </div>
         {% endif %}
     </div>

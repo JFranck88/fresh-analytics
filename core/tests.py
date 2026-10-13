@@ -3175,3 +3175,148 @@ class OrdenCompraAprobacionTests(TestCase):
     def test_la_direccion_vieja_del_pdf_lleva_a_ordenes(self):
         self.client.force_login(self.comprador)
         self.assertRedirects(self.client.get(reverse("generar_orden_compra")), reverse("listar_ordenes"))
+
+
+class EtiquetasCodigoBarrasTests(TestCase):
+    """2026-10-13: PDF con etiquetas Code 128 de los productos, para
+    imprimirlas o escanearlas desde la pantalla con la T60."""
+
+    def setUp(self):
+        self.comprador = crear_usuario("comprador.etiquetas@test.com", Usuario.Rol.COMPRADOR)
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="0101100")
+        self.sin_codigo = crear_producto(nombre="Queso fresco", upc=None)
+
+    def pdf(self, **params):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("etiquetas_pdf"), params)
+        return respuesta, b"".join(respuesta.streaming_content)
+
+    def test_genera_un_pdf(self):
+        respuesta, contenido = self.pdf()
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta["Content-Type"], "application/pdf")
+        self.assertTrue(contenido.startswith(b"%PDF"))
+
+    def test_los_codigos_se_pueden_leer(self):
+        try:
+            from pdf2image import convert_from_bytes
+            from pyzbar.pyzbar import decode
+        except ImportError:
+            self.skipTest("Sin pdf2image/pyzbar en este equipo")
+        _, contenido = self.pdf()
+        pagina = convert_from_bytes(contenido, dpi=200)[0]
+        self.assertEqual([c.data.decode() for c in decode(pagina)], ["0101100"])
+
+    def test_el_gerente_y_el_administrador_tambien_pueden(self):
+        for rol in (Usuario.Rol.GERENTE, Usuario.Rol.ADMINISTRADOR):
+            self.client.force_login(crear_usuario(f"{rol.lower()}.etiq@test.com", rol))
+            self.assertEqual(self.client.get(reverse("etiquetas_pdf")).status_code, 200)
+
+    def test_el_modo_pasillo_enlaza_las_etiquetas(self):
+        self.client.force_login(self.comprador)
+        self.assertContains(self.client.get(reverse("modo_pasillo")), reverse("etiquetas_pdf"))
+
+
+class MermaAutomaticaPorVencimientoTests(TestCase):
+    """2026-10-13: lo que vence sin venderse sale del inventario como merma
+    por VENCIMIENTO automática, en vez de inventar esas mermas al azar."""
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7401112260001", precio_compra=6.0, vida_util_dias=10)
+
+    def simular(self, desde, hasta, **extra):
+        from core.inventario import simular_periodo
+        return simular_periodo([self.leche], desde, hasta, Venta, Merma, Inventario,
+                               dar_de_baja_vencidos=True, **extra)
+
+    def test_lote_vencido_con_saldo_se_da_de_baja_como_merma(self):
+        lote = Inventario.objects.create(
+            producto=self.leche, cantidad=4, cantidad_inicial=10,
+            fecha_ingreso=self.hoy - timedelta(days=11), fecha_vencimiento=self.hoy - timedelta(days=1),
+        )
+        self.simular(self.hoy - timedelta(days=1), self.hoy - timedelta(days=1), reponer_hasta=self.hoy)
+        merma = Merma.objects.get()
+        self.assertEqual((merma.motivo, merma.cantidad, merma.automatica, merma.fecha), ("VENCIMIENTO", 4, True, self.hoy))
+        self.assertEqual(float(merma.costo_perdida), 24.0)
+        lote.refresh_from_db()
+        self.assertEqual(lote.cantidad, 0)
+
+    def test_la_merma_automatica_no_se_descuenta_dos_veces(self):
+        Inventario.objects.create(
+            producto=self.leche, cantidad=4, cantidad_inicial=10,
+            fecha_ingreso=self.hoy - timedelta(days=12), fecha_vencimiento=self.hoy - timedelta(days=2),
+        )
+        vigente = Inventario.objects.create(
+            producto=self.leche, cantidad=30, cantidad_inicial=30,
+            fecha_ingreso=self.hoy - timedelta(days=2), fecha_vencimiento=self.hoy + timedelta(days=8),
+        )
+        self.simular(self.hoy - timedelta(days=2), self.hoy - timedelta(days=2))
+        self.simular(self.hoy - timedelta(days=1), self.hoy - timedelta(days=1))
+        vigente.refresh_from_db()
+        self.assertEqual(vigente.cantidad, 30)  # la merma automática no tocó el lote bueno
+        self.assertEqual(Merma.objects.count(), 1)
+
+    def test_no_da_de_baja_sobrantes_viejos_fuera_del_periodo(self):
+        Inventario.objects.create(
+            producto=self.leche, cantidad=4, cantidad_inicial=10,
+            fecha_ingreso=self.hoy - timedelta(days=30), fecha_vencimiento=self.hoy - timedelta(days=20),
+        )
+        self.simular(self.hoy - timedelta(days=1), self.hoy - timedelta(days=1))
+        self.assertFalse(Merma.objects.exists())
+
+    def test_los_generadores_ya_no_inventan_mermas_por_vencimiento(self):
+        call_command("generar_datos_prueba", "--dias", "40", stdout=StringIO())
+        vencimiento = Merma.objects.filter(motivo="VENCIMIENTO")
+        self.assertTrue(vencimiento.exists())
+        self.assertFalse(vencimiento.filter(automatica=False).exists())
+        # Y cada merma automática corresponde a saldo que de verdad venció.
+        self.assertFalse(Inventario.objects.filter(cantidad__lt=0).exists())
+
+    def test_historial_de_mermas_las_marca_como_automaticas(self):
+        Merma.objects.create(producto=self.leche, fecha=self.hoy, cantidad=3, motivo="VENCIMIENTO",
+                             costo_perdida=18, automatica=True)
+        gerente = crear_usuario("gerente.mermaauto@test.com", Usuario.Rol.GERENTE)
+        self.client.force_login(gerente)
+        self.assertContains(self.client.get(reverse("listar_mermas")), "automática")
+
+
+class HuecosCasosDeUsoTests(TestCase):
+    """UC-01 3a (sin predicción: aviso y recomendación desactivada), UC-04 2a
+    (sin alertas: estado general óptimo) y aviso de órdenes en el Dashboard."""
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        self.comprador = crear_usuario("comprador.huecos@test.com", Usuario.Rol.COMPRADOR)
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7401112270001")
+        self.queso = crear_producto(nombre="Queso fresco", upc="7401112270002")
+        Prediccion.objects.create(producto=self.leche, fecha_prediccion=self.hoy, fecha_pronosticada=self.hoy,
+                                  valor_predicho=30, intervalo_inferior=25, intervalo_superior=35)
+
+    def test_producto_sin_prediccion_queda_desactivado(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("listar_recomendaciones"))
+        self.assertContains(respuesta, "Sin predicción del modelo para este producto")
+        self.assertNotContains(respuesta, f'name="ajuste_{self.queso.id_producto}"')
+
+    def test_producto_sin_prediccion_no_entra_a_la_orden(self):
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("listar_recomendaciones"), {
+            "accion": "enviar", f"ajuste_{self.leche.id_producto}": "30", f"ajuste_{self.queso.id_producto}": "10",
+        })
+        from .models import OrdenCompraDetalle
+        self.assertEqual(list(OrdenCompraDetalle.objects.values_list("producto__nombre", flat=True)), ["Leche entera 1L"])
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_sin_alertas_estado_general_optimo(self, _lluvia, _clima):
+        self.client.force_login(self.comprador)
+        self.assertContains(self.client.get(reverse("dashboard")), "Estado general óptimo")
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_dashboard_avisa_al_gerente_de_ordenes_por_aprobar(self, _lluvia, _clima):
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("listar_recomendaciones"), {"accion": "enviar", f"ajuste_{self.leche.id_producto}": "30"})
+        self.client.force_login(crear_usuario("gerente.huecos@test.com", Usuario.Rol.GERENTE))
+        self.assertContains(self.client.get(reverse("dashboard")), "orden de compra por aprobar")

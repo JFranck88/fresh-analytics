@@ -153,6 +153,9 @@ class Merma(models.Model):
     cantidad = models.FloatField()
     motivo = models.CharField(max_length=50, choices=Motivo.choices)
     costo_perdida = models.DecimalField(max_digits=10, decimal_places=2)
+    # True cuando la registró el sistema: un lote que venció con saldo y se
+    # dio de baja solo (ver core/inventario.py, dar_de_baja_vencidos).
+    automatica = models.BooleanField(default=False)
 
     class Meta:
         db_table = "merma"

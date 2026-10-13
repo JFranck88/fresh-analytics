@@ -2,7 +2,10 @@
 {% block titulo %} - Modo pasillo{% endblock %}
 {% block content %}
 <div class="pasillo">
-    <h5 class="mb-2"><i class="bi bi-upc-scan me-2"></i>Modo pasillo</h5>
+    <div class="d-flex justify-content-between align-items-center mb-2 gap-2">
+        <h5 class="mb-0"><i class="bi bi-upc-scan me-2"></i>Modo pasillo</h5>
+        <a href="{% url 'etiquetas_pdf' %}" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm" title="PDF con las etiquetas de código de barras de los productos, para imprimir o escanear desde la pantalla"><i class="bi bi-upc me-1"></i>Etiquetas</a>
+    </div>
 
     {# El lector de la T60 escribe el código en la casilla y manda Enter. #}
     {# Sin JavaScript es un GET normal; con JavaScript el resultado se trae #}

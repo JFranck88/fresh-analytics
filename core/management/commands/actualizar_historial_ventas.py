@@ -32,6 +32,7 @@ from core.management.commands.generar_datos_prueba import (
     FACTOR_SEMANA,
     MERMA_MINIMA_PESO,
     demanda_base,
+    motivo_merma_al_azar,
 )
 from core.models import Inventario, Merma, Producto, Venta
 
@@ -87,7 +88,7 @@ class Command(BaseCommand):
         # la mañana de hoy, para que el stock del día ya esté en bodega.
         simular_periodo(
             productos, desde, hasta, Venta, Merma, Inventario,
-            reponer_hasta=timezone.localdate(),
+            reponer_hasta=timezone.localdate(), dar_de_baja_vencidos=True,
         )
 
         self.stdout.write(self.style.SUCCESS(
@@ -137,18 +138,7 @@ class Command(BaseCommand):
                     cantidad_merma = max(minimo, producto.redondear_cantidad(
                         cantidad_dia * random.uniform(0.005, 0.03)
                     ))
-                    if producto.categoria in ("FRUTAS", "VERDURAS"):
-                        if producto.nombre == "Tomate de riñón":
-                            pesos = [0.25, 0.65, 0.10]
-                        else:
-                            pesos = [0.55, 0.35, 0.10]
-                        motivo = random.choices(
-                            ["DANO", "VENCIMIENTO", "OTRO"], weights=pesos
-                        )[0]
-                    else:
-                        motivo = random.choices(
-                            ["VENCIMIENTO", "OTRO", "ROBO"], weights=[0.75, 0.15, 0.10]
-                        )[0]
+                    motivo = motivo_merma_al_azar(producto)
 
                     mermas_bulk.append(Merma(
                         producto=producto, fecha=fecha, cantidad=cantidad_merma,

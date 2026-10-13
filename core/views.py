@@ -6,7 +6,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Sum, F, Q, Avg, Max, DecimalField
 from django.db.models.functions import Coalesce, TruncDate
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.templatetags.static import static
 from django.urls import reverse
@@ -1221,6 +1221,8 @@ def listar_recomendaciones(request):
             # Mismo criterio que MermaForm.clean_cantidad (ver forms.py):
             # un ajuste con decimales no tiene lógica para un producto que
             # se cuenta por pieza, solo para uno de peso variable.
+            if not Prediccion.objects.filter(producto=producto, fecha_prediccion=fecha_max).exists():
+                continue  # UC-01 3a: sin predicción, la recomendación está desactivada
             cantidad_ajustada, error = leer_cantidad(producto, valor_raw)
             if error:
                 messages.error(request, f"{error} No se guardó ese cambio.")
@@ -1249,8 +1251,25 @@ def listar_recomendaciones(request):
     # Francisco, 2026-09-18).
     solo_pendientes = request.GET.get("pendientes") == "1"
 
+    # UC-01, flujo alterno 3a: si el modelo no tiene predicción para un
+    # producto, se avisa y su recomendación queda desactivada (no se puede
+    # pedir a ciegas desde aquí).
+    con_prediccion = set(
+        Prediccion.objects.filter(fecha_prediccion=fecha_max).values_list("producto_id", flat=True)
+    ) if fecha_max else set()
+
     recomendaciones = []
     for producto in Producto.objects.filter(activo=True):
+        if producto.id_producto not in con_prediccion:
+            if not solo_pendientes:
+                recomendaciones.append({
+                    "producto_id": producto.id_producto,
+                    "producto": producto.nombre,
+                    "producto_upc": producto.codigo_upc,
+                    "unidad_medida": producto.unidad_medida,
+                    "sin_prediccion": True,
+                })
+            continue
         prediccion_semana = Prediccion.objects.filter(
             producto=producto, fecha_prediccion=fecha_max
         ).aggregate(total=Sum("valor_predicho"))["total"] or 0
@@ -1727,3 +1746,86 @@ def asignar_codigo_pasillo(request):
         texto += f" (reemplaza al anterior, {anterior})"
     messages.success(request, texto + ".")
     return redirect(_url_pasillo(codigo))
+
+
+# Etiquetas con código de barras (2026-10-13). Francisco todavía no tiene
+# etiquetas físicas de los productos: con este PDF se imprimen (o se abren
+# en pantalla) y la T60 las escanea en el Modo pasillo. Code 128 porque
+# acepta cualquier código (los de demo tienen 7 dígitos, no son EAN-13).
+ETIQUETAS_COLUMNAS = 3
+ETIQUETAS_FILAS = 7
+
+
+@rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
+def etiquetas_pdf(request):
+    import io
+    from reportlab.graphics.barcode import code128
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    productos = Producto.objects.filter(activo=True).exclude(codigo_upc__isnull=True).exclude(codigo_upc="")
+    producto_id = request.GET.get("producto", "")
+    if producto_id.isdigit():
+        productos = productos.filter(id_producto=producto_id)
+    productos = list(productos.order_by("categoria", "nombre"))
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.setTitle("Fresh Analytics - Etiquetas para Modo pasillo")
+    ancho_pag, alto_pag = letter
+    margen = 24
+    ancho = (ancho_pag - 2 * margen) / ETIQUETAS_COLUMNAS
+    alto = (alto_pag - 2 * margen - 20) / ETIQUETAS_FILAS
+    por_pagina = ETIQUETAS_COLUMNAS * ETIQUETAS_FILAS
+
+    def encabezado():
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.setFillColor(colors.HexColor("#1B4332"))
+        pdf.drawString(margen, alto_pag - margen, "Fresh Analytics - etiquetas para escanear en el Modo pasillo")
+        pdf.setFillColor(colors.black)
+
+    if not productos:
+        encabezado()
+        pdf.setFont("Helvetica", 11)
+        pdf.drawString(margen, alto_pag - margen - 30, "No hay productos activos con código asignado.")
+    for i, producto in enumerate(productos):
+        if i % por_pagina == 0:
+            if i:
+                pdf.showPage()
+            encabezado()
+        pos = i % por_pagina
+        col, fila = pos % ETIQUETAS_COLUMNAS, pos // ETIQUETAS_COLUMNAS
+        x = margen + col * ancho
+        y = alto_pag - margen - 20 - (fila + 1) * alto
+
+        pdf.setStrokeColor(colors.HexColor("#B7C9BE"))
+        pdf.setDash(3, 3)
+        pdf.rect(x + 3, y + 3, ancho - 6, alto - 6)
+        pdf.setDash()
+
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawCentredString(x + ancho / 2, y + alto - 18, producto.nombre[:32])
+        es_peso = producto.unidad_medida == Producto.UnidadMedida.PESO
+        precio = f"{producto.precio_venta:.2f}".replace(".", ",")
+        pdf.setFont("Helvetica", 8)
+        pdf.drawCentredString(
+            x + ancho / 2, y + alto - 29,
+            f"{producto.get_categoria_display()} · Q {precio} {'por libra' if es_peso else 'c/u'}",
+        )
+        # Barras anchas (1.3 pt por módulo) para que el lector de la T60 las
+        # lea también desde una pantalla.
+        barras = code128.Code128(producto.codigo_upc, barWidth=1.3, barHeight=34, humanReadable=False)
+        escala = min(1, (ancho - 20) / barras.width)
+        pdf.saveState()
+        pdf.translate(x + (ancho - barras.width * escala) / 2, y + 22)
+        pdf.scale(escala, 1)
+        barras.drawOn(pdf, 0, 0)
+        pdf.restoreState()
+        pdf.setFont("Courier-Bold", 10)
+        pdf.drawCentredString(x + ancho / 2, y + 10, producto.codigo_upc)
+
+    pdf.save()
+    buffer.seek(0)
+    return FileResponse(buffer, as_attachment=False, filename="etiquetas_fresh_analytics.pdf",
+                        content_type="application/pdf")

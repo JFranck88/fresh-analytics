@@ -66,6 +66,17 @@ def demanda_base(producto):
     return base
 
 
+def motivo_merma_al_azar(producto):
+    """Motivo de las mermas sintéticas del día a día (daño, robo, otro).
+    Desde el 2026-10-13 ya no se inventan mermas por VENCIMIENTO: esas las
+    genera el inventario vivo cuando un lote vence con saldo (ver
+    core/inventario.py, dar_de_baja_vencidos), así que salen de lo que
+    realmente sobró y no de un dado."""
+    if producto.categoria in ("FRUTAS", "VERDURAS"):
+        return random.choices(["DANO", "OTRO"], weights=[0.8, 0.2])[0]
+    return random.choices(["OTRO", "ROBO"], weights=[0.6, 0.4])[0]
+
+
 # La precisión de cada cantidad (venta, merma, lote) según sea peso
 # variable o por unidad vive en Producto.redondear_cantidad() - un único
 # lugar, usado tanto aquí como en actualizar_historial_ventas.py, para que
@@ -154,18 +165,7 @@ class Command(BaseCommand):
                     cantidad_merma = max(minimo, producto.redondear_cantidad(
                         cantidad_dia * random.uniform(0.005, 0.03)
                     ))
-                    if producto.categoria in ("FRUTAS", "VERDURAS"):
-                        if producto.nombre == "Tomate de riñón":
-                            pesos = [0.25, 0.65, 0.10]
-                        else:
-                            pesos = [0.55, 0.35, 0.10]
-                        motivo = random.choices(
-                            ["DANO", "VENCIMIENTO", "OTRO"], weights=pesos
-                        )[0]
-                    else:
-                        motivo = random.choices(
-                            ["VENCIMIENTO", "OTRO", "ROBO"], weights=[0.75, 0.15, 0.10]
-                        )[0]
+                    motivo = motivo_merma_al_azar(producto)
 
                     mermas_bulk.append(Merma(
                         producto=producto, fecha=fecha, cantidad=cantidad_merma,
@@ -192,7 +192,7 @@ class Command(BaseCommand):
         # Inventario vivo (core/inventario.py): los lotes se construyen
         # simulando la reposición día por día y descontando cada venta y
         # merma con la regla FEFO, en vez de sumar lotes que nadie vende.
-        reconstruir_inventario(Producto, Venta, Merma, Inventario)
+        reconstruir_inventario(Producto, Venta, Merma, Inventario, dar_de_baja_vencidos=True)
 
         self.stdout.write(self.style.SUCCESS(
             f"Listo: {dias} días generados para {len(productos)} productos (con efecto de lluvia)."

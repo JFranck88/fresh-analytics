@@ -41,7 +41,9 @@ va con |unlocalize; el texto de las otras columnas sigue con coma.
                     <tr>
                         <td class="text-muted small celda-sub">{{ r.producto_upc|default:"—" }}</td>
                         <td class="celda-titulo">{{ r.producto }}</td>
-                        {% if r.unidad_medida == "PESO" %}
+                        {% if r.sin_prediccion %}
+                        <td colspan="4" data-label="Recomendación" class="text-muted small"><i class="bi bi-exclamation-circle me-1"></i>Sin predicción del modelo para este producto: la recomendación queda desactivada hasta la próxima corrida.</td>
+                        {% elif r.unidad_medida == "PESO" %}
                         <td data-label="Predicción 7 días">{{ r.prediccion_semana|floatformat:2 }} lb</td>
                         <td data-label="Stock actual">{{ r.stock_actual|floatformat:2 }} lb</td>
                         <td data-label="Sugerido"><strong>{{ r.sugerido|floatformat:2 }} lb</strong></td>
