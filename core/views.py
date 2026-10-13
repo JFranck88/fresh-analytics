@@ -223,15 +223,130 @@ def productos_en_riesgo_por_calor(filas_riesgo):
     return primera_fecha, len(productos_por_fecha[primera_fecha])
 
 
+MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+    "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+# Semanas hacia atrás que se usan como "semana normal" para medir cuánto
+# espera el modelo que suba la venta en quincena / fin de mes.
+SEMANAS_BASE_QUINCENA = 4
+
+
+def _tipo_dia_pago(fecha):
+    if fecha.day in DIAS_QUINCENA_MEDIO:
+        return "quincena"
+    if fecha.day in DIAS_FIN_DE_MES:
+        return "fin de mes"
+    return None
+
+
+def _venta_real_por_dia_en_quetzales(desde, hasta):
+    """Venta real del departamento (Q) por fecha, en [desde, hasta]."""
+    totales = {}
+    filas = Venta.objects.filter(fecha__date__gte=desde, fecha__date__lte=hasta).values_list(
+        "fecha", "cantidad", "precio_unitario"
+    )
+    for fecha, cantidad, precio in filas:
+        dia = timezone.localtime(fecha).date() if timezone.is_aware(fecha) else fecha.date()
+        totales[dia] = totales.get(dia, 0) + cantidad * float(precio)
+    return totales
+
+
+def aviso_quincena(hoy):
+    """Petición de Francisco (2026-10-13): el modelo SÍ toma en cuenta la
+    quincena y el fin de mes (es una variable de Prophet en
+    entrenar_modelo.py), pero la pantalla solo lo mencionaba cuando ya era
+    día 14. Ahora se anticipa: si dentro de los próximos 7 días (el
+    horizonte del pronóstico) cae una quincena o un fin de mes, se avisa con
+    el aumento que espera el modelo, calculado con sus propias predicciones.
+
+    El aumento se mide contra "una semana normal": para cada día de pago se
+    toma la venta real del MISMO día de la semana en las 4 semanas
+    anteriores (sin contar otros días de pago). Comparar contra el mismo día
+    de la semana evita confundir el efecto quincena con el de fin de semana
+    (un sábado siempre vende más que un martes).
+
+    Devuelve un mensajes_contexto ({"icono", "texto"}) o None."""
+    fecha_max = Prediccion.objects.order_by("-fecha_prediccion").values_list(
+        "fecha_prediccion", flat=True
+    ).first()
+
+    bloque, tipo = [], None
+    for offset in range(7):
+        dia = hoy + timedelta(days=offset)
+        tipo_dia = _tipo_dia_pago(dia)
+        if tipo_dia and (tipo is None or tipo_dia == tipo):
+            bloque.append(dia)
+            tipo = tipo_dia
+        elif bloque:
+            break
+    if not bloque:
+        return None
+
+    primero, ultimo = bloque[0], bloque[-1]
+    def nombrar(d):
+        return f"{DIAS_SEMANA_ES[d.weekday()]} {d.day}"
+    if len(bloque) == 1:
+        texto_dias = f"el {nombrar(primero)} de {MESES_ES[primero.month - 1]}"
+    else:
+        mes = f" de {MESES_ES[ultimo.month - 1]}"
+        texto_dias = f"del {nombrar(primero)} al {nombrar(ultimo)}{mes}"
+    if hoy in bloque:
+        inicio = f"Estamos en {tipo} (hasta el {nombrar(ultimo)}):"
+    else:
+        inicio = f"Se acerca {'la quincena' if tipo == 'quincena' else 'el fin de mes'}, {texto_dias}:"
+
+    # Venta esperada por el modelo en esos días (Q), según la corrida más reciente.
+    pronostico = {}
+    if fecha_max:
+        for p in Prediccion.objects.filter(
+            fecha_prediccion=fecha_max, fecha_pronosticada__in=bloque, producto__activo=True,
+        ).select_related("producto"):
+            pronostico[p.fecha_pronosticada] = (
+                pronostico.get(p.fecha_pronosticada, 0) + p.valor_predicho * float(p.producto.precio_venta)
+            )
+
+    # "Semana normal": mismo día de la semana, semanas anteriores, sin días de pago.
+    reales = _venta_real_por_dia_en_quetzales(
+        primero - timedelta(weeks=SEMANAS_BASE_QUINCENA), ultimo - timedelta(weeks=1)
+    )
+    esperado_total = base_total = 0
+    for dia in bloque:
+        comparables = [
+            reales[d] for d in (dia - timedelta(weeks=k) for k in range(1, SEMANAS_BASE_QUINCENA + 1))
+            if d in reales and d < hoy and _tipo_dia_pago(d) is None
+        ]
+        if dia in pronostico and comparables:
+            esperado_total += pronostico[dia]
+            base_total += sum(comparables) / len(comparables)
+
+    if base_total > 0:
+        aumento = (esperado_total / base_total - 1) * 100
+        if aumento >= 3:
+            detalle = (
+                f" el modelo espera vender Q {esperado_total:.0f} en el departamento, "
+                f"un {aumento:.0f}% más que esos mismos días en una semana normal."
+            )
+        elif aumento <= -3:
+            detalle = (
+                f" el modelo espera vender Q {esperado_total:.0f} en el departamento, "
+                f"un {abs(aumento):.0f}% menos que esos mismos días en una semana normal."
+            )
+        else:
+            detalle = " el modelo no prevé un cambio notable frente a una semana normal."
+    else:
+        detalle = " el modelo ya incluye este efecto en sus pronósticos."
+
+    return {"icono": "📅", "texto": inicio + detalle}
+
+
 def construir_contexto_inteligente(hoy, clima_por_dia=None):
     mensajes = []
 
-    if hoy.day in DIAS_QUINCENA:
-        mensajes.append({
-            "icono": "📅",
-            "texto": "Estamos en periodo de quincena - el modelo ya ajustó "
-                     "sus predicciones esperando mayor demanda.",
-        })
+    aviso = aviso_quincena(hoy)
+    if aviso:
+        mensajes.append(aviso)
 
     pronostico = pronostico_lluvia_real()
     for fecha, prob in sorted(pronostico.items()):

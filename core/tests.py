@@ -2639,3 +2639,74 @@ class ModoPasilloEscaneoSinRecargarTests(TestCase):
         respuesta = self.client.get(reverse("modo_pasillo"), {"codigo": "7401234567890", "parcial": "1"})
         self.assertEqual(respuesta.status_code, 302)
         self.assertIn(reverse("login"), respuesta.url)
+
+
+class AvisoQuincenaTests(TestCase):
+    """Petición de Francisco (2026-10-13): el modelo incluye la quincena y
+    el fin de mes como variable, pero la pantalla no lo anticipaba. El aviso
+    sale con hasta 7 días de anticipación y con el aumento que espera el
+    modelo frente al mismo día de la semana en semanas normales."""
+
+    HOY = date(2026, 10, 13)  # martes; la quincena cae miércoles 14 a viernes 16
+
+    def setUp(self):
+        from .views import aviso_quincena
+        self.aviso_quincena = aviso_quincena
+        self.producto = crear_producto("Leche entera 1L", precio_venta=10)
+
+    def venta(self, dia, cantidad):
+        Venta.objects.create(
+            producto=self.producto, cantidad=cantidad, precio_unitario=10,
+            fecha=timezone.make_aware(timezone.datetime(dia.year, dia.month, dia.day, 12, 0)),
+        )
+
+    def prediccion(self, dia, valor):
+        Prediccion.objects.create(
+            producto=self.producto, fecha_prediccion=self.HOY, fecha_pronosticada=dia,
+            valor_predicho=valor, intervalo_inferior=valor, intervalo_superior=valor,
+        )
+
+    def test_anticipa_la_quincena_con_el_aumento_esperado(self):
+        bloque = [date(2026, 10, 14), date(2026, 10, 15), date(2026, 10, 16)]
+        for dia in bloque:
+            for semanas in (1, 2, 3, 4):  # mismos días de la semana, semanas normales: 100 u. = Q 1000
+                self.venta(dia - timedelta(weeks=semanas), 100)
+            self.prediccion(dia, 125)       # el modelo espera 125 u. = Q 1250 cada día
+        aviso = self.aviso_quincena(self.HOY)
+        self.assertIn("Se acerca la quincena, del miércoles 14 al viernes 16 de octubre", aviso["texto"])
+        self.assertIn("Q 3750", aviso["texto"])
+        self.assertIn("un 25% más", aviso["texto"])
+
+    def test_no_compara_contra_otro_dia_de_pago(self):
+        """El 30 de septiembre (fin de mes) no es "semana normal" para el 14."""
+        dia = date(2026, 10, 14)
+        self.venta(dia - timedelta(weeks=1), 100)   # 7 oct: normal
+        self.venta(date(2026, 9, 16), 999)          # 16 sep: quincena, no debe contar
+        self.prediccion(dia, 150)
+        self.assertIn("un 50% más", self.aviso_quincena(self.HOY)["texto"])
+
+    def test_sin_historial_avisa_sin_inventar_un_porcentaje(self):
+        self.prediccion(date(2026, 10, 14), 125)
+        texto = self.aviso_quincena(self.HOY)["texto"]
+        self.assertIn("ya incluye este efecto", texto)
+        self.assertNotIn("%", texto)
+
+    def test_si_hoy_ya_es_quincena(self):
+        texto = self.aviso_quincena(date(2026, 10, 15))["texto"]
+        self.assertTrue(texto.startswith("Estamos en quincena (hasta el viernes 16)"))
+
+    def test_fin_de_mes(self):
+        texto = self.aviso_quincena(date(2026, 10, 27))["texto"]
+        self.assertIn("Se acerca el fin de mes, del jueves 29", texto)
+
+    def test_semana_sin_dias_de_pago_no_avisa(self):
+        self.assertIsNone(self.aviso_quincena(date(2026, 10, 20)))  # 20 al 26: nada
+
+    @patch("core.views.pronostico_temperatura_humedad_por_dia", return_value={})
+    @patch("core.views.pronostico_lluvia_real", return_value={})
+    def test_el_aviso_se_ve_en_el_dashboard(self, _lluvia, _clima):
+        comprador = crear_usuario("comprador@test.com", Usuario.Rol.COMPRADOR)
+        self.client.force_login(comprador)
+        with patch("core.views.timezone.localdate", return_value=self.HOY):
+            respuesta = self.client.get(reverse("dashboard"))
+        self.assertContains(respuesta, "Se acerca la quincena")
