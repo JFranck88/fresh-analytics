@@ -3604,6 +3604,23 @@ class ErrorEnUnidadesTests(TestCase):
         self.assertContains(self.client.get(reverse("listar_predicciones")), "±4 u. por día")
 
 
+class SerieDiariaPromocionTests(TestCase):
+    """2026-10-14: el entrenamiento en GitHub Actions (Postgres) falló con
+    "function max(boolean) does not exist" al leer la promoción de cada día.
+    SQLite sí acepta MAX() sobre booleanos; ahora se convierte a 0/1 antes."""
+
+    def test_la_serie_diaria_marca_los_dias_con_promocion(self):
+        from core.management.commands.entrenar_modelo import obtener_serie_diaria
+        yogurt = crear_producto(nombre="Yogurt real", upc="7893630210399", origen=Producto.Origen.REAL)
+        ahora = timezone.now()
+        Venta.objects.create(producto=yogurt, fecha=ahora - timedelta(days=2), cantidad=10, precio_unitario=5.95, promocion_aplicada=True)
+        Venta.objects.create(producto=yogurt, fecha=ahora - timedelta(days=2), cantidad=9, precio_unitario=5.95, promocion_aplicada=False)
+        Venta.objects.create(producto=yogurt, fecha=ahora - timedelta(days=1), cantidad=9, precio_unitario=6.45, promocion_aplicada=False)
+        serie = obtener_serie_diaria(yogurt, con_lluvia=False)
+        self.assertEqual(list(serie["y"]), [19, 9])
+        self.assertEqual(list(serie["promocion"]), [1, 0])
+
+
 class CodigoInternoConCerosTests(TestCase):
     """El aguacate del supermercado tiene código interno 0000000001185: en el
     Modo pasillo se puede escribir o escanear solo 1185."""

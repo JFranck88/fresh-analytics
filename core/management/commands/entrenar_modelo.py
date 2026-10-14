@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pandas as pd
 from django.core.management.base import BaseCommand
-from django.db.models import Max, Sum
+from django.db.models import Case, IntegerField, Max, Sum, Value, When
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from prophet import Prophet
@@ -18,7 +18,18 @@ def obtener_serie_diaria(producto, con_lluvia=True):
         Venta.objects.filter(producto=producto)
         .annotate(dia=TruncDate("fecha"))
         .values("dia")
-        .annotate(total=Sum("cantidad"), promo=Max("promocion_aplicada"))
+        # Postgres no acepta MAX() sobre un booleano (SQLite sí; falló en
+        # GitHub Actions el 2026-10-14), así que se convierte a 0/1 antes.
+        .annotate(
+            total=Sum("cantidad"),
+            promo=Max(
+                Case(
+                    When(promocion_aplicada=True, then=Value(1)),
+                    default=Value(0),
+                    output_field=IntegerField(),
+                )
+            ),
+        )
         .order_by("dia")
     )
     df = pd.DataFrame(list(filas))
