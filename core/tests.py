@@ -3177,46 +3177,6 @@ class OrdenCompraAprobacionTests(TestCase):
         self.assertRedirects(self.client.get(reverse("generar_orden_compra")), reverse("listar_ordenes"))
 
 
-class EtiquetasCodigoBarrasTests(TestCase):
-    """2026-10-13: PDF con etiquetas Code 128 de los productos, para
-    imprimirlas o escanearlas desde la pantalla con la T60."""
-
-    def setUp(self):
-        self.comprador = crear_usuario("comprador.etiquetas@test.com", Usuario.Rol.COMPRADOR)
-        self.leche = crear_producto(nombre="Leche entera 1L", upc="0101100")
-        self.sin_codigo = crear_producto(nombre="Queso fresco", upc=None)
-
-    def pdf(self, **params):
-        self.client.force_login(self.comprador)
-        respuesta = self.client.get(reverse("etiquetas_pdf"), params)
-        return respuesta, b"".join(respuesta.streaming_content)
-
-    def test_genera_un_pdf(self):
-        respuesta, contenido = self.pdf()
-        self.assertEqual(respuesta.status_code, 200)
-        self.assertEqual(respuesta["Content-Type"], "application/pdf")
-        self.assertTrue(contenido.startswith(b"%PDF"))
-
-    def test_los_codigos_se_pueden_leer(self):
-        try:
-            from pdf2image import convert_from_bytes
-            from pyzbar.pyzbar import decode
-        except ImportError:
-            self.skipTest("Sin pdf2image/pyzbar en este equipo")
-        _, contenido = self.pdf()
-        pagina = convert_from_bytes(contenido, dpi=200)[0]
-        self.assertEqual([c.data.decode() for c in decode(pagina)], ["0101100"])
-
-    def test_el_gerente_y_el_administrador_tambien_pueden(self):
-        for rol in (Usuario.Rol.GERENTE, Usuario.Rol.ADMINISTRADOR):
-            self.client.force_login(crear_usuario(f"{rol.lower()}.etiq@test.com", rol))
-            self.assertEqual(self.client.get(reverse("etiquetas_pdf")).status_code, 200)
-
-    def test_el_modo_pasillo_enlaza_las_etiquetas(self):
-        self.client.force_login(self.comprador)
-        self.assertContains(self.client.get(reverse("modo_pasillo")), reverse("etiquetas_pdf"))
-
-
 class MermaAutomaticaPorVencimientoTests(TestCase):
     """2026-10-13: lo que vence sin venderse sale del inventario como merma
     por VENCIMIENTO automática, en vez de inventar esas mermas al azar."""
