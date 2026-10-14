@@ -880,3 +880,8 @@ a.topbar-buscador-item:hover {
 .orden-evento { border-left: 3px solid #CBD5E1; padding: 4px 0 8px 12px; }
 .orden-evento-rechazada { border-left-color: #C0392B; }
 .orden-evento-aprobada, .orden-evento-recibida { border-left-color: var(--brote); }
+
+/* ¿Quién acertó más? (Historial de decisiones, UC-05) */
+.efectividad-numero { font-size: 28px; font-weight: 700; color: var(--bosque); line-height: 1.1; }
+.ganador-modelo { background: #D8F3DC; color: var(--bosque); }
+.ganador-comprador { background: #DBEAFE; color: #1E3A8A; }

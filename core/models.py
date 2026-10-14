@@ -337,6 +337,10 @@ class DecisionHistorial(models.Model):
     )
     cantidad_sugerida = models.FloatField()
     cantidad_ajustada = models.FloatField()
+    # Stock vigente cuando se tomó la decisión: con él y la venta real de
+    # los 7 días siguientes se calcula quién acertó más, el modelo o el
+    # Comprador (ver core/efectividad.py). Se guarda desde el 2026-10-14.
+    stock_al_decidir = models.FloatField(null=True, blank=True)
 
     class Meta:
         db_table = "decision_historial"

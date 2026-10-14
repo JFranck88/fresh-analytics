@@ -45,6 +45,26 @@
     </div>
 </div>
 
+{% if efectividad.evaluadas %}
+<div class="card mb-3 efectividad-card">
+    <div class="card-body">
+        <h6 class="mb-2"><i class="bi bi-trophy me-1"></i>¿Quién acertó más?</h6>
+        <p class="text-muted small mb-3">Cuando pasan los 7 días que cubría cada decisión, se compara lo que sugirió el modelo y lo que pidió el comprador contra lo que de verdad hacía falta (venta real de esos días menos el stock que había).</p>
+        <div class="row g-3 text-center">
+            <div class="col-4"><div class="efectividad-numero">{{ efectividad.gana_modelo }}</div><div class="small text-muted">veces más cerca el <strong>modelo</strong></div></div>
+            <div class="col-4"><div class="efectividad-numero">{{ efectividad.gana_comprador }}</div><div class="small text-muted">veces más cerca el <strong>comprador</strong></div></div>
+            <div class="col-4"><div class="efectividad-numero">{{ efectividad.empates }}</div><div class="small text-muted">empates</div></div>
+        </div>
+        {% if efectividad.error_modelo_pct is not None %}
+        <p class="small mb-0 mt-3 text-center">Desvío promedio frente a lo que hacía falta: modelo <strong>{{ efectividad.error_modelo_pct }}%</strong> · comprador <strong>{{ efectividad.error_comprador_pct }}%</strong>
+            <span class="text-muted">({{ efectividad.evaluadas }} {% if efectividad.evaluadas == 1 %}decisión evaluada{% else %}decisiones evaluadas{% endif %}{% if efectividad.pendientes %}, {{ efectividad.pendientes }} todavía en curso{% endif %})</span></p>
+        {% endif %}
+    </div>
+</div>
+{% elif efectividad.pendientes %}
+<div class="alert alert-light border small"><i class="bi bi-hourglass-split me-1"></i>"¿Quién acertó más?" se calcula cuando pasan los 7 días de cada decisión: hay {{ efectividad.pendientes }} en curso.</div>
+{% endif %}
+
 <div class="card">
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -59,6 +79,8 @@
                     <th>Ajustado</th>
                     <th>Diferencia</th>
                     <th>Margen de error</th>
+                    <th>Hacía falta</th>
+                    <th>¿Quién acertó?</th>
                 </tr>
             </thead>
             <tbody>
@@ -78,9 +100,19 @@
                     <td>{{ f.diferencia|floatformat:0 }} u.</td>
                     {% endif %}
                     <td>{% if f.mape is not None %}{{ f.mape }}%{% else %}—{% endif %}</td>
+                    {% with e=f.evaluacion %}
+                    {% if e.estado == "evaluada" %}
+                        <td>{% if f.unidad_medida == "PESO" %}{{ e.necesidad|floatformat:2 }} lb{% else %}{{ e.necesidad|floatformat:0 }} u.{% endif %}</td>
+                        <td>{% if e.ganador == "MODELO" %}<span class="badge ganador-modelo">Modelo</span>{% elif e.ganador == "COMPRADOR" %}<span class="badge ganador-comprador">Comprador</span>{% else %}<span class="badge bg-light text-dark border">Empate</span>{% endif %}</td>
+                    {% elif e.estado == "pendiente" %}
+                        <td colspan="2" class="text-muted small">Se evalúa el {{ e.evalua_el|date:"d/m/Y" }}</td>
+                    {% else %}
+                        <td colspan="2" class="text-muted small" title="{{ e.motivo }}">Sin datos suficientes</td>
+                    {% endif %}
+                    {% endwith %}
                 </tr>
                 {% empty %}
-                <tr><td colspan="{% if es_gerente %}8{% else %}7{% endif %}" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>Sin registros en el rango seleccionado.</td></tr>
+                <tr><td colspan="{% if es_gerente %}10{% else %}9{% endif %}" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>Sin registros en el rango seleccionado.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

@@ -79,9 +79,11 @@ def leer_cantidad(producto, valor_raw):
     return producto.redondear_cantidad(cantidad), None
 
 
-def registrar_decision(producto, usuario, fecha_prediccion, sugerido, ajustada):
+def registrar_decision(producto, usuario, fecha_prediccion, sugerido, ajustada, stock=None):
     """RF-09: deja en el historial solo los ajustes distintos al sugerido.
-    Si la persona vuelve a poner el sugerido, se quita el registro viejo."""
+    Si la persona vuelve a poner el sugerido, se quita el registro viejo.
+    `stock` es el stock vigente al decidir (para evaluar después quién
+    acertó más); si no se conoce, se conserva el que ya estaba guardado."""
     if ajustada == sugerido:
         DecisionHistorial.objects.filter(
             producto=producto, usuario=usuario, fecha_prediccion=fecha_prediccion,
@@ -89,7 +91,8 @@ def registrar_decision(producto, usuario, fecha_prediccion, sugerido, ajustada):
         return
     DecisionHistorial.objects.update_or_create(
         producto=producto, usuario=usuario, fecha_prediccion=fecha_prediccion,
-        defaults={"cantidad_sugerida": sugerido, "cantidad_ajustada": ajustada},
+        defaults={"cantidad_sugerida": sugerido, "cantidad_ajustada": ajustada,
+                  **({"stock_al_decidir": stock} if stock is not None else {})},
     )
 
 

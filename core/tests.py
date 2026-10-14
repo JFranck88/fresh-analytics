@@ -3280,3 +3280,87 @@ class HuecosCasosDeUsoTests(TestCase):
         self.client.post(reverse("listar_recomendaciones"), {"accion": "enviar", f"ajuste_{self.leche.id_producto}": "30"})
         self.client.force_login(crear_usuario("gerente.huecos@test.com", Usuario.Rol.GERENTE))
         self.assertContains(self.client.get(reverse("dashboard")), "orden de compra por aprobar")
+
+
+class QuienAcertoMasTests(TestCase):
+    """UC-05, paso 4 (2026-10-14): cuando pasan los 7 días de una decisión,
+    se compara el sugerido del modelo y el ajuste del Comprador contra lo
+    que de verdad hacía falta (venta real - stock al decidir)."""
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        self.comprador = crear_usuario("comprador.acierto@test.com", Usuario.Rol.COMPRADOR)
+        self.gerente = crear_usuario("gerente.acierto@test.com", Usuario.Rol.GERENTE)
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7401112280001")
+        self.corrida = self.hoy - timedelta(days=10)
+        for i in range(7):  # predijo 10 por día: 70 en la semana
+            Prediccion.objects.create(producto=self.leche, fecha_prediccion=self.corrida,
+                                      fecha_pronosticada=self.corrida + timedelta(days=i),
+                                      valor_predicho=10, intervalo_inferior=8, intervalo_superior=12)
+
+    def vender_por_dia(self, cantidad):
+        from datetime import datetime, time
+        for i in range(7):
+            dia = self.corrida + timedelta(days=i)
+            Venta.objects.create(producto=self.leche, cantidad=cantidad, precio_unitario=8,
+                                 fecha=timezone.make_aware(datetime.combine(dia, time(12))))
+
+    def decision(self, sugerido, ajustado, stock=20, corrida=None):
+        return DecisionHistorial.objects.create(
+            producto=self.leche, usuario=self.comprador, fecha_prediccion=corrida or self.corrida,
+            cantidad_sugerida=sugerido, cantidad_ajustada=ajustado, stock_al_decidir=stock,
+        )
+
+    def evaluar(self, d):
+        from core.efectividad import evaluar_decision
+        return evaluar_decision(d, self.hoy)
+
+    def test_gana_el_comprador_si_quedo_mas_cerca(self):
+        self.vender_por_dia(12)  # vendió 84; con 20 en stock hacían falta 64
+        e = self.evaluar(self.decision(sugerido=50, ajustado=60))
+        self.assertEqual((e["estado"], e["necesidad"], e["ganador"]), ("evaluada", 64, "COMPRADOR"))
+
+    def test_gana_el_modelo_si_quedo_mas_cerca(self):
+        self.vender_por_dia(10)  # vendió 70; hacían falta 50
+        e = self.evaluar(self.decision(sugerido=50, ajustado=35))
+        self.assertEqual(e["ganador"], "MODELO")
+
+    def test_empate(self):
+        self.vender_por_dia(10)
+        self.assertEqual(self.evaluar(self.decision(sugerido=45, ajustado=55))["ganador"], "EMPATE")
+
+    def test_pendiente_mientras_no_pasan_los_7_dias(self):
+        corrida = self.hoy - timedelta(days=2)
+        for i in range(7):
+            Prediccion.objects.create(producto=self.leche, fecha_prediccion=corrida,
+                                      fecha_pronosticada=corrida + timedelta(days=i),
+                                      valor_predicho=10, intervalo_inferior=8, intervalo_superior=12)
+        e = self.evaluar(self.decision(50, 40, corrida=corrida))
+        self.assertEqual((e["estado"], e["evalua_el"]), ("pendiente", corrida + timedelta(days=7)))
+
+    def test_decisiones_viejas_deducen_el_stock_del_sugerido(self):
+        self.vender_por_dia(10)
+        d = self.decision(sugerido=50, ajustado=50, stock=None)  # 70 predicho - 50 sugerido = 20 de stock
+        self.assertEqual(self.evaluar(d)["necesidad"], 50)
+
+    def test_sin_stock_y_con_sugerido_cero_no_se_evalua(self):
+        self.vender_por_dia(10)
+        self.assertEqual(self.evaluar(self.decision(sugerido=0, ajustado=10, stock=None))["estado"], "sin_datos")
+
+    def test_la_pantalla_muestra_el_resumen_y_el_ganador(self):
+        self.vender_por_dia(12)
+        self.decision(sugerido=50, ajustado=60)
+        self.client.force_login(self.gerente)
+        respuesta = self.client.get(reverse("historial_decisiones"))
+        self.assertContains(respuesta, "¿Quién acertó más?")
+        self.assertEqual(respuesta.context["efectividad"]["gana_comprador"], 1)
+        self.assertContains(respuesta, "ganador-comprador")
+
+    def test_al_ajustar_se_guarda_el_stock_del_momento(self):
+        Prediccion.objects.create(producto=self.leche, fecha_prediccion=self.hoy, fecha_pronosticada=self.hoy,
+                                  valor_predicho=30, intervalo_inferior=25, intervalo_superior=35)
+        Inventario.objects.create(producto=self.leche, cantidad=12, cantidad_inicial=12,
+                                  fecha_ingreso=self.hoy, fecha_vencimiento=self.hoy + timedelta(days=5))
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("listar_recomendaciones"), {"accion": "guardar", f"ajuste_{self.leche.id_producto}": "25"})
+        self.assertEqual(DecisionHistorial.objects.get(fecha_prediccion=self.hoy).stock_al_decidir, 12)

@@ -21,6 +21,7 @@ from .forms import (
     EditarUsuarioForm, RestablecerPasswordForm,
 )
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta, DecisionHistorial
+from .efectividad import evaluar_decision, resumen as resumen_efectividad
 from .inventario import descontar_merma
 from .views_ordenes import crear_orden, leer_cantidad, orden_abierta_de, registrar_decision
 from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_por_dia
@@ -1229,7 +1230,10 @@ def listar_recomendaciones(request):
                 hubo_error = True
                 continue
             sugerido = calcular_cantidad_sugerida(producto, fecha_max, hoy)
-            registrar_decision(producto, request.user, fecha_max, sugerido, cantidad_ajustada)
+            stock = Inventario.objects.filter(
+                producto=producto, fecha_vencimiento__gte=hoy
+            ).aggregate(total=Sum("cantidad"))["total"] or 0
+            registrar_decision(producto, request.user, fecha_max, sugerido, cantidad_ajustada, stock)
             lineas.append((producto, sugerido, cantidad_ajustada))
 
         if not enviar:
@@ -1329,6 +1333,11 @@ def historial_decisiones(request):
     paginador = Paginator(historial_qs, REGISTROS_POR_PAGINA)
     pagina = paginador.get_page(request.GET.get("pagina"))
 
+    # ¿Quién acertó más? (UC-05, paso 4). El resumen toma todas las
+    # decisiones del filtro (hasta 500), no solo las de esta página.
+    hoy = timezone.localdate()
+    efectividad = resumen_efectividad([evaluar_decision(h, hoy) for h in historial_qs[:500]])
+
     filas = []
     for h in pagina.object_list:
         mape = Prediccion.objects.filter(
@@ -1345,6 +1354,7 @@ def historial_decisiones(request):
             "ajustado": h.cantidad_ajustada,
             "diferencia": h.cantidad_ajustada - h.cantidad_sugerida,
             "mape": round(mape, 2) if mape is not None else None,
+            "evaluacion": evaluar_decision(h, hoy),
         })
 
     contexto = {
@@ -1355,6 +1365,7 @@ def historial_decisiones(request):
         "desde": desde,
         "hasta": hasta,
         "hay_resultados": bool(filas),
+        "efectividad": efectividad,
     }
     return render(request, "historial_decisiones.html", contexto)
 
