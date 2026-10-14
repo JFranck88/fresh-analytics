@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pandas as pd
 from django.core.management.base import BaseCommand
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from prophet import Prophet
@@ -18,7 +18,7 @@ def obtener_serie_diaria(producto, con_lluvia=True):
         Venta.objects.filter(producto=producto)
         .annotate(dia=TruncDate("fecha"))
         .values("dia")
-        .annotate(total=Sum("cantidad"))
+        .annotate(total=Sum("cantidad"), promo=Max("promocion_aplicada"))
         .order_by("dia")
     )
     df = pd.DataFrame(list(filas))
@@ -26,26 +26,37 @@ def obtener_serie_diaria(producto, con_lluvia=True):
         return df
     df = df.rename(columns={"dia": "ds", "total": "y"})
     df["ds"] = pd.to_datetime(df["ds"])
+    df["promocion"] = df["promo"].astype(int)
+    df = df.drop(columns=["promo"])
     df["es_quincena"] = df["ds"].dt.day.isin(DIAS_QUINCENA).astype(int)
     if con_lluvia:
         df["lluvia"] = df["ds"].apply(lambda d: lluvia_sintetica(d.date()))
     return df
 
 
-def construir_modelo(con_lluvia=True, anual=True):
+def construir_modelo(con_lluvia=True, anual=True, con_promocion=False, flexibilidad=0.05):
     """Productos REALES (2026-10-14): sin el regresor de lluvia, porque la
     lluvia histórica que tiene FAs es simulada y no corresponde a su
     historia; y estacionalidad anual solo con al menos dos años de datos."""
-    modelo = Prophet(interval_width=0.80, weekly_seasonality=True, yearly_seasonality=anual)
+    modelo = Prophet(interval_width=0.80, weekly_seasonality=True, yearly_seasonality=anual,
+                     changepoint_prior_scale=flexibilidad)
     modelo.add_country_holidays(country_name="GT")
     modelo.add_regressor("es_quincena")
     if con_lluvia:
         modelo.add_regressor("lluvia")
+    # Productos REALES con días con y sin promoción en su historia: el modelo
+    # separa el efecto de la promoción de la tendencia (el yogurt del
+    # supermercado vendía 19/día en promoción y 12,5 sin ella). Para los
+    # días que vienen se asume que no hay promoción.
+    if con_promocion:
+        modelo.add_regressor("promocion")
     return modelo
 
 
 def agregar_regresores_a_futuro(df_futuro, usar_pronostico_real=False, con_lluvia=True):
     df_futuro["es_quincena"] = df_futuro["ds"].dt.day.isin(DIAS_QUINCENA).astype(int)
+    if "promocion" not in df_futuro:
+        df_futuro["promocion"] = 0
     if not con_lluvia:
         return df_futuro
 
@@ -59,6 +70,22 @@ def agregar_regresores_a_futuro(df_futuro, usar_pronostico_real=False, con_lluvi
 
     df_futuro["lluvia"] = df_futuro["ds"].apply(calcular_lluvia)
     return df_futuro
+
+
+def calcular_error_unidades(reales, predichos):
+    """Error promedio por día en unidades o libras (2026-10-14): en productos
+    de poca venta el MAPE se dispara (vender 1 y pronosticar 5 ya es 400%),
+    así que se muestra también cuánto se equivoca en producto."""
+    if not reales:
+        return None
+    return round(sum(abs(r - p) for r, p in zip(reales, predichos)) / len(reales), 2)
+
+
+# Productos REALES: con poca historia no hay una configuración que sirva
+# para todos (el yogurt del supermercado bajó fuerte al terminar su
+# promoción; el aguacate no). Se prueban estas combinaciones con la última
+# semana real y se queda la que menos se equivocó en unidades.
+FLEXIBILIDADES_REALES = (0.05, 0.2, 0.5)
 
 
 def calcular_mape(reales, predichos):
@@ -89,6 +116,7 @@ class Command(BaseCommand):
                 )
                 continue
 
+            con_promocion = es_real and df["promocion"].nunique() > 1
             # La historia de un producto real puede terminar antes de ayer
             # (el último reporte que mandó el supermercado): todo se mide
             # desde su último día con datos, no desde hoy.
@@ -99,19 +127,34 @@ class Command(BaseCommand):
             df_entreno = df[df["ds"] < pd.Timestamp(corte)]
             df_real_reciente = df[df["ds"] >= pd.Timestamp(corte)]
 
-            mape = None
-            if len(df_entreno) >= 30 and not df_real_reciente.empty:
-                modelo_val = construir_modelo(con_lluvia, anual)
-                modelo_val.fit(df_entreno)
-                futuro_val = agregar_regresores_a_futuro(
-                    df_real_reciente[["ds"]].copy(), usar_pronostico_real=False, con_lluvia=con_lluvia,
-                )
-                pronostico_val = modelo_val.predict(futuro_val)
-                mape = calcular_mape(
-                    df_real_reciente["y"].tolist(), pronostico_val["yhat"].tolist()
-                )
+            if es_real:
+                configuraciones = [
+                    (flex, promo) for flex in FLEXIBILIDADES_REALES
+                    for promo in ((False, True) if con_promocion else (False,))
+                ]
+            else:
+                configuraciones = [(0.05, False)]
 
-            modelo = construir_modelo(con_lluvia, anual)
+            mape = error_unidades = None
+            mejor = configuraciones[0]
+            if len(df_entreno) >= 30 and not df_real_reciente.empty:
+                reales = df_real_reciente["y"].tolist()
+                resultados = []
+                for flex, promo in configuraciones:
+                    modelo_val = construir_modelo(
+                        con_lluvia, anual, promo and df_entreno["promocion"].nunique() > 1, flex,
+                    )
+                    modelo_val.fit(df_entreno)
+                    # En el backtest sí se conoce si hubo promoción esos días.
+                    futuro_val = agregar_regresores_a_futuro(
+                        df_real_reciente[["ds", "promocion"]].copy(), usar_pronostico_real=False, con_lluvia=con_lluvia,
+                    )
+                    predichos = [max(0, v) for v in modelo_val.predict(futuro_val)["yhat"].tolist()]
+                    resultados.append((calcular_error_unidades(reales, predichos), calcular_mape(reales, predichos), (flex, promo)))
+                error_unidades, mape, mejor = min(resultados, key=lambda r: r[0])
+
+            flexibilidad, usar_promocion = mejor
+            modelo = construir_modelo(con_lluvia, anual, usar_promocion, flexibilidad)
             modelo.fit(df)
             # Siempre los 7 días desde HOY, aunque la historia termine antes.
             futuro = pd.DataFrame({"ds": pd.date_range(pd.Timestamp(hoy), periods=7, freq="D")})
@@ -133,10 +176,13 @@ class Command(BaseCommand):
                     intervalo_inferior=max(0, round(fila["yhat_lower"], 2)),
                     intervalo_superior=max(0, round(fila["yhat_upper"], 2)),
                     precision_modelo=mape,
+                    error_unidades=error_unidades,
                 ))
             Prediccion.objects.bulk_create(nuevas)
 
-            mape_txt = f"MAPE={mape}%" if mape is not None else "MAPE=N/D"
+            mape_txt = f"MAPE={mape}%, ±{error_unidades}/día" if mape is not None else "MAPE=N/D"
+            if es_real:
+                mape_txt += f", flexibilidad {flexibilidad}{', con promoción' if usar_promocion else ''}"
             self.stdout.write(self.style.SUCCESS(f"  {producto.nombre}: OK ({mape_txt})"))
 
         self.stdout.write(self.style.SUCCESS(

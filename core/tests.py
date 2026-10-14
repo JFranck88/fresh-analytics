@@ -13,7 +13,7 @@ manual completa, pero cubre las rutas críticas.
 
 import json
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO, StringIO
 from unittest.mock import patch
 
@@ -3514,3 +3514,103 @@ class RegistrarExistenciaPasilloTests(TestCase):
         self.client.force_login(crear_usuario("gerente.existencia@test.com", Usuario.Rol.GERENTE))
         respuesta = self.client.post(reverse("registrar_existencia"), {"producto": self.manzana.id_producto, "cantidad": "1"})
         self.assertEqual(respuesta.status_code, 403)
+
+
+class ImportarFormatoSupermercadoTests(TestCase):
+    """2026-10-14: el primer archivo real del supermercado no usó la plantilla
+    tal cual: encabezados en la fila 3 y 4, dos tablas de ventas lado a lado,
+    la ficha en dos bloques con el encabezado repetido, "Nombre del produto"
+    y columnas sin título. Además el yogurt traía 3 días con precio Q 0 y el
+    aguacate un precio de ficha desactualizado."""
+
+    def setUp(self):
+        self.admin = crear_usuario("admin.super@test.com", Usuario.Rol.ADMINISTRADOR)
+        self.hoy = timezone.localdate()
+
+    def archivo(self):
+        from openpyxl import Workbook
+        wb = Workbook()
+        g = wb.active; g.title = "General"
+        enc = ["Código de barras", "Nombre del produto", "Categoría", "Se vende por", "Vida útil (días)",
+               "Proveedor", "Precio de compra", "Precio de venta", "Días de entrega del proveedor", "Notas"]
+        for c, v in enumerate(enc, start=2): g.cell(row=4, column=c, value=v)
+        for c, v in enumerate([7893630210399, "YOGURT BEBIBLE LALA", "Lacteos", "unidad", 60, "Lala", 4.62, 6.45, "Martes y viernes"], start=2):
+            g.cell(row=5, column=c, value=v)
+        for c, v in enumerate(enc, start=2): g.cell(row=10, column=c, value=v)
+        for c, v in enumerate(["0000000001185", "AGUACATE HASS UNIDAD", "Verduras", "unidad", 6, "Proveedora", 2.9, 4.9, "Lunes"], start=2):
+            g.cell(row=11, column=c, value=v)
+        v = wb.create_sheet("Ventas")
+        v["B2"] = "YOGUR LALA"; v["I2"] = "AGUACATE HASS"
+        for c, t in zip("BCDEF", ["Fecha", "Código de barras", "Cantidad vendida", "Precio de venta", "¿En promoción?"]):
+            v[f"{c}3"] = t
+        for c, t in zip("IJKNO", ["Fecha", "Código de barras", "Cantidad vendida", "Precio de venta", "¿En promoción?"]):
+            v[f"{c}3"] = t
+        for i in range(20):
+            fila = 4 + i
+            dia = datetime.combine(self.hoy - timedelta(days=20 - i), datetime.min.time())
+            v[f"B{fila}"] = dia; v[f"C{fila}"] = 7893630210399
+            v[f"D{fila}"] = 0 if i < 3 else 10; v[f"E{fila}"] = 0 if i < 3 else 5.95; v[f"F{fila}"] = "Si"
+            v[f"I{fila}"] = dia; v[f"J{fila}"] = "0000000001185"; v[f"K{fila}"] = 400
+            v[f"L{fila}"] = 1160; v[f"M{fila}"] = 1740  # columnas sin título (costo y venta total)
+            v[f"N{fila}"] = 4.35; v[f"O{fila}"] = "No"
+        buffer = BytesIO(); wb.save(buffer); buffer.seek(0); buffer.name = "Prueba_FAs.xlsx"
+        return buffer
+
+    def importar(self):
+        self.client.force_login(self.admin)
+        return self.client.post(reverse("importar_datos"), {"archivo": self.archivo()}).context["resultado"]
+
+    def test_lee_las_dos_fichas_y_las_dos_tablas_de_ventas(self):
+        res = self.importar()
+        self.assertEqual(res.errores, [])
+        self.assertEqual(sorted(res.productos_creados), ["AGUACATE HASS UNIDAD", "YOGURT BEBIBLE LALA"])
+        self.assertEqual(Venta.objects.filter(producto__codigo_upc="7893630210399").count(), 20)
+        self.assertEqual(Venta.objects.filter(producto__codigo_upc="0000000001185").count(), 20)
+        self.assertEqual(Producto.objects.get(codigo_upc="0000000001185").categoria, "VERDURAS")
+
+    def test_dias_sin_precio_toman_el_precio_registrado_mas_cercano(self):
+        self.importar()
+        primeras = Venta.objects.filter(producto__codigo_upc="7893630210399").order_by("fecha")[:3]
+        self.assertEqual([(v.cantidad, str(v.precio_unitario)) for v in primeras], [(0, "5.95")] * 3)
+
+    def test_usa_el_precio_vigente_si_la_ficha_esta_desactualizada(self):
+        res = self.importar()
+        self.assertEqual(str(Producto.objects.get(codigo_upc="0000000001185").precio_venta), "4.35")
+        self.assertEqual(str(Producto.objects.get(codigo_upc="7893630210399").precio_venta), "5.95")
+        self.assertTrue(any("Q 4,90" in a and "Q 4,35" in a for a in res.avisos))
+
+    def test_la_promocion_se_guarda(self):
+        self.importar()
+        self.assertTrue(all(Venta.objects.filter(producto__codigo_upc="7893630210399").values_list("promocion_aplicada", flat=True)))
+
+
+class ErrorEnUnidadesTests(TestCase):
+    """2026-10-14: junto al MAPE se muestra el error promedio en unidades o
+    libras por día, porque en productos de poca venta el MAPE se dispara."""
+
+    def test_calcula_el_error_promedio_por_dia(self):
+        from core.management.commands.entrenar_modelo import calcular_error_unidades, calcular_mape
+        reales, predichos = [5, 1, 12, 8], [9, 6, 0, 7]
+        self.assertEqual(calcular_error_unidades(reales, predichos), 5.5)  # (4+5+12+1)/4
+        self.assertGreater(calcular_mape(reales, predichos), 100)  # el % explota con ventas chicas
+
+    def test_predicciones_muestra_el_error_en_unidades(self):
+        comprador = crear_usuario("comprador.errorunidades@test.com", Usuario.Rol.COMPRADOR)
+        yogurt = crear_producto(nombre="Yogurt real", upc="7893630210399", origen=Producto.Origen.REAL)
+        hoy = timezone.localdate()
+        Prediccion.objects.create(producto=yogurt, fecha_prediccion=hoy, fecha_pronosticada=hoy, valor_predicho=6,
+                                  intervalo_inferior=0, intervalo_superior=12, precision_modelo=122.91, error_unidades=4.15)
+        self.client.force_login(comprador)
+        self.assertContains(self.client.get(reverse("listar_predicciones")), "±4 u. por día")
+
+
+class CodigoInternoConCerosTests(TestCase):
+    """El aguacate del supermercado tiene código interno 0000000001185: en el
+    Modo pasillo se puede escribir o escanear solo 1185."""
+
+    def test_encuentra_el_codigo_sin_los_ceros(self):
+        comprador = crear_usuario("comprador.ceros@test.com", Usuario.Rol.COMPRADOR)
+        crear_producto(nombre="Aguacate Hass", upc="0000000001185", origen=Producto.Origen.REAL)
+        self.client.force_login(comprador)
+        ficha = self.client.get(reverse("modo_pasillo"), {"codigo": "1185"}).context["ficha"]
+        self.assertEqual(ficha["producto"].nombre, "Aguacate Hass")

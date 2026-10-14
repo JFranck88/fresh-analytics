@@ -1601,6 +1601,13 @@ def variantes_codigo(codigo):
             variantes.append(codigo[1:])
         elif len(codigo) == 12:
             variantes.append("0" + codigo)
+        # Códigos internos rellenados con ceros (el aguacate del supermercado
+        # es 0000000001185): escribir o escanear "1185" también lo encuentra.
+        if len(codigo) < 13:
+            variantes.append(codigo.zfill(13))
+        corto = codigo.lstrip("0")
+        if corto and corto != codigo:
+            variantes.append(corto)
     return variantes
 
 

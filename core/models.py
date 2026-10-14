@@ -184,6 +184,10 @@ class Prediccion(models.Model):
     intervalo_inferior = models.FloatField()
     intervalo_superior = models.FloatField()
     precision_modelo = models.FloatField(null=True, blank=True)
+    # Error promedio por día de la última semana de prueba, en unidades o
+    # libras (2026-10-14). Acompaña al MAPE: en productos de poca venta el
+    # porcentaje se dispara aunque el error real sea de pocas unidades.
+    error_unidades = models.FloatField(null=True, blank=True)
 
     class Meta:
         db_table = "prediccion"

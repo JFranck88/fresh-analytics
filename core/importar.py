@@ -7,6 +7,12 @@ ventas diarias. Esta lectura acepta la plantilla de Fresh Analytics
 Excel (.xlsx) o CSV, siempre que tenga encabezados reconocibles (código,
 fecha, cantidad...). Si vienen ventas por ticket, se suman por día.
 
+Los reportes reales no siempre traen la tabla en la fila 1 (2026-10-14,
+primer archivo del supermercado): los encabezados pueden empezar más
+abajo, venir dos tablas lado a lado en la misma hoja (una por producto) o
+repetirse en bloques. Por eso se buscan las filas de encabezados en toda
+la hoja y cada grupo de columnas se lee como una tabla aparte.
+
 - Productos: se crean o actualizan como origen REAL (el proceso nocturno
   no les inventa ventas, inventario ni mermas).
 - Ventas: una Venta por producto y por día. Si ese día ya estaba cargado,
@@ -63,16 +69,75 @@ def _normalizar(texto):
     return re.sub(r"[^a-z0-9]", "", texto.lower())
 
 
-def _mapear_columnas(encabezados):
-    """{campo: índice de columna} a partir de los encabezados del archivo."""
-    normalizados = [_normalizar(h) for h in encabezados]
-    columnas = {}
+# Si el encabezado no coincide exacto con un sinónimo, se busca por
+# palabras que contiene (ej. "Nombre del produto", con la c de menos).
+PALABRAS_CLAVE = [
+    ("precio_compra", ("preciocompra", "preciodecompra", "costo")),
+    ("precio_venta", ("precio",)),
+    ("vida_util", ("vidautil", "vida")),
+    ("promocion", ("promo", "oferta")),
+    ("cantidad", ("cantidad", "unidadesvendidas")),
+    ("codigo", ("codigo", "barra")),
+    ("nombre", ("nombre", "descripcion")),
+    ("categoria", ("categ",)),
+    ("unidad", ("vendepor", "medida")),
+    ("proveedor", ("proveedor",)),
+    ("fecha", ("fecha",)),
+]
+
+
+def _campo(encabezado):
+    """Qué dato trae una columna según su encabezado (None si no se reconoce)."""
+    texto = _normalizar(encabezado)
+    if not texto or len(texto) > 40 or "entrega" in texto:  # "Días de entrega del proveedor" no se usa
+        return None
     for campo, opciones in SINONIMOS.items():
-        for opcion in opciones:  # el sinónimo más específico gana
-            if opcion in normalizados and normalizados.index(opcion) not in columnas.values():
-                columnas[campo] = normalizados.index(opcion)
-                break
-    return columnas
+        if texto in opciones:
+            return campo
+    for campo, palabras in PALABRAS_CLAVE:
+        if any(p in texto for p in palabras):
+            return campo
+    return None
+
+
+def _grupos_de_encabezado(fila):
+    """Divide una fila en grupos de columnas: cuando un dato se repite (otra
+    "Fecha", otro "Código"), empieza otra tabla al lado. Un grupo cuenta como
+    encabezado solo si reconoce al menos 3 datos e incluye el código o la
+    fecha: así una fila de datos con valores como "unidad" o el nombre de un
+    proveedor no se confunde con un encabezado."""
+    grupos, actual = [], {}
+    for indice, celda in enumerate(fila):
+        campo = _campo(celda) if isinstance(celda, str) else None
+        if campo is None:
+            continue
+        if campo in actual:
+            grupos.append(actual)
+            actual = {}
+        actual[campo] = indice
+    if actual:
+        grupos.append(actual)
+    return [g for g in grupos if len(g) >= 3 and ("codigo" in g or "fecha" in g)]
+
+
+def extraer_tablas(filas):
+    """[(columnas, [(número_de_fila, fila), ...])] de una hoja. Una fila de
+    encabezados abre tablas nuevas (una por grupo de columnas); las filas de
+    datos se reparten entre las tablas abiertas."""
+    tablas, abiertas = [], []
+    for numero, fila in enumerate(filas, start=1):
+        grupos = _grupos_de_encabezado(fila)
+        if grupos:
+            abiertas = []
+            for cols in grupos:
+                tabla = (cols, [])
+                tablas.append(tabla)
+                abiertas.append(tabla)
+            continue
+        for cols, datos in abiertas:
+            if any(i < len(fila) and fila[i] not in (None, "") for i in cols.values()):
+                datos.append((numero, fila))
+    return [t for t in tablas if t[1]]
 
 
 def _texto(valor):
@@ -160,13 +225,14 @@ def _es_ejemplo(fila):
 
 
 def _importar_productos(hoja, filas, cols, res):
+    """filas: [(número_de_fila, fila)] ya sin el encabezado."""
     obligatorios = ["codigo", "nombre", "categoria", "unidad", "precio_venta"]
     faltan = [c for c in obligatorios if c not in cols]
     if faltan:
         res.error(f"Hoja {hoja}: faltan columnas de producto ({', '.join(faltan)}).")
         return
-    for n, fila in enumerate(filas[1:], start=2):
-        if not any(c not in (None, "") for c in fila) or _es_ejemplo(fila):
+    for n, fila in filas:
+        if _es_ejemplo(fila):
             continue
         valor = lambda campo: fila[cols[campo]] if campo in cols and cols[campo] < len(fila) else None
         codigo, nombre = _texto(valor("codigo")), _texto(valor("nombre"))
@@ -194,7 +260,7 @@ def _importar_productos(hoja, filas, cols, res):
             res.avisos.append(f"{nombre}: no traía vida útil; se usaron {vida} días (confírmalo con el encargado).")
         if precio_compra is None:
             precio_compra = round(precio_venta * 0.7, 2)
-            res.avisos.append(f"{nombre}: no traía precio de compra; se estimó en 70% del de venta (Q {precio_compra:.2f}).")
+            res.avisos.append(f"{nombre}: no traía precio de compra; se estimó en 70% del de venta (Q {_q(precio_compra)}).")
 
         existente = Producto.objects.filter(codigo_upc=codigo).first()
         if existente and existente.origen != Producto.Origen.REAL:
@@ -215,7 +281,53 @@ def _importar_productos(hoja, filas, cols, res):
             res.productos_creados.append(nombre)
 
 
+def _precio_del_dia(dia):
+    if dia["con_precio"]:
+        return dia["importe"] / dia["con_precio"]
+    return dia.get("precio_simple")  # día con precio pero 0 vendidos
+
+
+def _precios_por_dia(dias, fechas):
+    """Precio de cada día; los días sin precio toman el último registrado
+    antes, o el siguiente si no hay ninguno antes (decisión de Francisco,
+    2026-10-14: el yogurt traía 3 días con precio Q 0)."""
+    precios, ultimo = {}, None
+    for f in fechas:
+        ultimo = _precio_del_dia(dias[f]) or ultimo
+        precios[f] = ultimo
+    siguiente = None
+    for f in reversed(fechas):
+        siguiente = _precio_del_dia(dias[f]) or siguiente
+        precios[f] = precios[f] or siguiente
+    return precios
+
+
+DIAS_PRECIO_VIGENTE = 14
+
+
+def _q(valor):
+    return f"{float(valor):.2f}".replace(".", ",")
+
+
+def _actualizar_precio_vigente(producto, precios, fechas, res):
+    """El precio de venta de la ficha puede estar desactualizado (el
+    aguacate decía Q 4,90 y se vendió a Q 4,35 todo octubre). Se usa el
+    precio que más se repitió en los últimos 14 días con venta."""
+    recientes = [round(precios[f], 2) for f in fechas[-DIAS_PRECIO_VIGENTE:] if precios[f]]
+    if not recientes:
+        return
+    vigente = max(sorted(set(recientes), reverse=True), key=recientes.count)
+    if abs(vigente - float(producto.precio_venta)) >= 0.01:
+        res.avisos.append(
+            f"{producto.nombre}: la ficha decía precio de venta Q {_q(producto.precio_venta)}, pero en las "
+            f"últimas ventas el precio vigente es Q {_q(vigente)}; FAs usa Q {_q(vigente)}."
+        )
+        producto.precio_venta = Decimal(f"{vigente:.2f}")
+        producto.save(update_fields=["precio_venta"])
+
+
 def _importar_ventas(hoja, filas, cols, res):
+    """filas: [(número_de_fila, fila)] ya sin el encabezado."""
     faltan = [c for c in ("codigo", "fecha", "cantidad") if c not in cols]
     if faltan:
         res.error(f"Hoja {hoja}: faltan columnas de venta ({', '.join(faltan)}).")
@@ -223,8 +335,8 @@ def _importar_ventas(hoja, filas, cols, res):
     por_dia = defaultdict(lambda: {"cantidad": 0.0, "importe": 0.0, "con_precio": 0.0, "promo": False})
     hoy = timezone.localdate()
     productos = {}
-    for n, fila in enumerate(filas[1:], start=2):
-        if not any(c not in (None, "") for c in fila) or _es_ejemplo(fila):
+    for n, fila in filas:
+        if _es_ejemplo(fila):
             continue
         valor = lambda campo: fila[cols[campo]] if campo in cols and cols[campo] < len(fila) else None
         codigo = _texto(valor("codigo"))
@@ -252,9 +364,10 @@ def _importar_ventas(hoja, filas, cols, res):
         dia = por_dia[(producto.id_producto, fecha)]
         dia["cantidad"] += cantidad
         precio = _numero(valor("precio_venta"))
-        if precio is not None:
+        if precio:  # precio 0 o vacío = sin dato (se completa abajo)
             dia["importe"] += precio * cantidad
             dia["con_precio"] += cantidad
+            dia["precio_simple"] = precio
         dia["promo"] = dia["promo"] or _si(valor("promocion"))
 
     if not por_dia:
@@ -265,6 +378,14 @@ def _importar_ventas(hoja, filas, cols, res):
     for pid, dias in por_producto.items():
         producto = Producto.objects.get(id_producto=pid)
         fechas = sorted(dias)
+        precios = _precios_por_dia(dias, fechas)
+        sin_precio = [f for f in fechas if not _precio_del_dia(dias[f])]
+        if sin_precio and any(precios.values()):
+            res.avisos.append(
+                f"{producto.nombre}: {len(sin_precio)} día(s) sin precio ("
+                + ", ".join(f"{f:%d/%m}" for f in sin_precio[:6]) + ("…" if len(sin_precio) > 6 else "")
+                + "); se usó el último precio registrado (o el siguiente, si no había uno antes)."
+            )
         ya_cargados = set(
             timezone.localtime(f).date() for f in Venta.objects.filter(
                 producto=producto, fecha__date__gte=fechas[0] - timedelta(days=1),
@@ -278,7 +399,7 @@ def _importar_ventas(hoja, filas, cols, res):
         for f in fechas:
             dia = dias[f]
             cantidad = producto.redondear_cantidad(dia["cantidad"])
-            precio = dia["importe"] / dia["con_precio"] if dia["con_precio"] else float(producto.precio_venta)
+            precio = precios[f] or float(producto.precio_venta)
             nuevas.append(Venta(
                 producto=producto, cantidad=cantidad, promocion_aplicada=dia["promo"],
                 precio_unitario=Decimal(f"{precio:.2f}"),
@@ -297,6 +418,7 @@ def _importar_ventas(hoja, filas, cols, res):
                 res.descontado_de_lotes += sim.consumir(producto, dias[f]["cantidad"], f)
             sim.guardar()
 
+        _actualizar_precio_vigente(producto, precios, fechas, res)
         res.ventas[producto.nombre] = {
             "dias": len(fechas), "desde": fechas[0], "hasta": fechas[-1],
             "total": sum(producto.redondear_cantidad(dias[f]["cantidad"]) for f in fechas),
@@ -316,13 +438,11 @@ def importar(archivo, nombre):
 
     con_productos, con_ventas = [], []
     for hoja, filas in tablas:
-        if not filas:
-            continue
-        cols = _mapear_columnas(filas[0])
-        if "fecha" in cols and "cantidad" in cols:
-            con_ventas.append((hoja, filas, cols))
-        elif "nombre" in cols and "codigo" in cols:
-            con_productos.append((hoja, filas, cols))
+        for cols, datos in extraer_tablas(filas):
+            if "fecha" in cols and "cantidad" in cols:
+                con_ventas.append((hoja, datos, cols))
+            elif "nombre" in cols and "codigo" in cols:
+                con_productos.append((hoja, datos, cols))
     if not con_productos and not con_ventas:
         res.error("No se encontró ninguna tabla con encabezados reconocibles (código, nombre, fecha, cantidad...).")
         return res
