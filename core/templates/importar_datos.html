@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block titulo %} - Importar datos{% endblock %}
+{% block content %}
+<h5 class="mb-2"><i class="bi bi-file-earmark-arrow-up me-2"></i>Importar datos del supermercado</h5>
+<p class="text-muted small mb-3">
+    Carga la ficha de los productos y sus ventas diarias desde la plantilla de Fresh Analytics o desde el reporte que exporte el sistema del supermercado (Excel .xlsx o CSV).
+    Los productos quedan marcados como <strong>reales</strong>: el proceso nocturno no les inventa ventas, inventario ni mermas.
+    Volver a cargar el mismo archivo no duplica nada: los días que ya estaban se reemplazan.
+</p>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center">
+            {% csrf_token %}
+            <input type="file" name="archivo" accept=".xlsx,.csv" class="form-control" style="max-width: 420px" required>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-upload me-1"></i>Importar</button>
+        </form>
+    </div>
+</div>
+
+{% if resultado %}
+<div class="card mb-3">
+    <div class="card-body">
+        <h6 class="mb-3"><i class="bi bi-clipboard-data me-1"></i>Resultado de la importación</h6>
+        {% if resultado.productos_creados or resultado.productos_actualizados %}
+            <p class="mb-2">
+                {% if resultado.productos_creados %}<strong>Productos nuevos:</strong> {{ resultado.productos_creados|join:", " }}. {% endif %}
+                {% if resultado.productos_actualizados %}<strong>Productos actualizados:</strong> {{ resultado.productos_actualizados|join:", " }}.{% endif %}
+            </p>
+        {% endif %}
+        {% if resultado.ventas %}
+            <div class="table-responsive mb-2">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Producto</th><th>Días con venta</th><th>Desde</th><th>Hasta</th><th>Total vendido</th></tr></thead>
+                    <tbody>
+                        {% for nombre, v in resultado.ventas.items %}
+                        <tr><td>{{ nombre }}</td><td>{{ v.dias }}</td><td>{{ v.desde|date:"d/m/Y" }}</td><td>{{ v.hasta|date:"d/m/Y" }}</td><td>{{ v.total|floatformat:2 }} {{ v.unidad }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if resultado.descontado_de_lotes %}<p class="small text-muted mb-2">Las ventas nuevas descontaron {{ resultado.descontado_de_lotes|floatformat:2 }} del inventario contado.</p>{% endif %}
+            <div class="alert alert-light border small mb-2"><i class="bi bi-cpu me-1"></i><strong>Siguiente paso:</strong> correr el entrenamiento del modelo (GitHub → Actions → "Entrenamiento diario Fresh Analytics" → Run workflow) para que salgan las predicciones de estos productos.</div>
+        {% elif not resultado.productos_creados and not resultado.productos_actualizados and not resultado.errores %}
+            <p class="text-muted mb-2">El archivo no traía filas para importar.</p>
+        {% endif %}
+        {% if resultado.avisos %}
+            <div class="alert alert-warning small mb-2"><strong>Para revisar:</strong><ul class="mb-0">{% for a in resultado.avisos %}<li>{{ a }}</li>{% endfor %}</ul></div>
+        {% endif %}
+        {% if resultado.errores %}
+            <div class="alert alert-danger small mb-0"><strong>Filas que no se cargaron:</strong><ul class="mb-0">{% for e in resultado.errores %}<li>{{ e }}</li>{% endfor %}</ul></div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body">
+        <h6 class="mb-2"><i class="bi bi-shop me-1"></i>Productos reales en FAs</h6>
+        {% if reales %}
+            <ul class="mb-0">
+                {% for p in reales %}<li>{{ p.nombre }} <span class="text-muted small">· {{ p.codigo_upc }} · {{ p.get_categoria_display }} · {% if p.unidad_medida == "PESO" %}por libra{% else %}por unidad{% endif %} · {{ p.ventas.count }} días con venta</span></li>{% endfor %}
+            </ul>
+        {% else %}
+            <p class="text-muted mb-0">Todavía no se ha cargado ningún producto del supermercado.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

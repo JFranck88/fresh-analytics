@@ -14,7 +14,7 @@ manual completa, pero cubre las rutas críticas.
 import json
 import re
 from datetime import date, timedelta
-from io import StringIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -3364,3 +3364,153 @@ class QuienAcertoMasTests(TestCase):
         self.client.force_login(self.comprador)
         self.client.post(reverse("listar_recomendaciones"), {"accion": "guardar", f"ajuste_{self.leche.id_producto}": "25"})
         self.assertEqual(DecisionHistorial.objects.get(fecha_prediccion=self.hoy).stock_al_decidir, 12)
+
+
+class ImportarDatosRealesTests(TestCase):
+    """2026-10-14: el supermercado solo tiene la ficha de sus productos y las
+    ventas diarias. Se importan desde Excel o CSV como productos REALES."""
+
+    def setUp(self):
+        self.admin = crear_usuario("admin.importar@test.com", Usuario.Rol.ADMINISTRADOR)
+        self.hoy = timezone.localdate()
+
+    def excel(self, productos, ventas):
+        from openpyxl import Workbook
+        wb = Workbook()
+        hp = wb.active; hp.title = "Productos"
+        hp.append(["Código de barras", "Nombre del producto", "Categoría", "Se vende por", "Vida útil (días)",
+                   "Proveedor", "Precio de compra Q", "Precio de venta Q"])
+        hp.append(["7401234567890", "Leche de ejemplo", "Lácteos", "Unidad", 10, "X", 7.5, 10.25])  # fila de ejemplo
+        for fila in productos:
+            hp.append(fila)
+        hv = wb.create_sheet("Ventas_diarias")
+        hv.append(["Fecha", "Código de barras", "Cantidad vendida", "Precio de venta Q", "¿En promoción?"])
+        for fila in ventas:
+            hv.append(fila)
+        buffer = BytesIO(); wb.save(buffer); buffer.seek(0); buffer.name = "datos.xlsx"
+        return buffer
+
+    def subir(self, archivo):
+        self.client.force_login(self.admin)
+        return self.client.post(reverse("importar_datos"), {"archivo": archivo})
+
+    def productos_demo(self):
+        return [["7401005002118", "Leche Dos Pinos 1 L", "Lácteos", "Unidad", 12, "Dos Pinos", 8.10, 11.50],
+                ["2400345", "Manzana roja", "Frutas", "Libra", None, "Frutas del Norte", None, 7.95]]
+
+    def test_importa_productos_reales_y_ventas_por_dia(self):
+        ayer = self.hoy - timedelta(days=1)
+        respuesta = self.subir(self.excel(self.productos_demo(), [
+            [ayer, "7401005002118", 40, 11.5, "No"],
+            [ayer.strftime("%d/%m/%Y"), "2400345", "12,35", "7,95", "Sí"],
+        ]))
+        res = respuesta.context["resultado"]
+        self.assertEqual(res.errores, [])
+        leche = Producto.objects.get(codigo_upc="7401005002118")
+        manzana = Producto.objects.get(codigo_upc="2400345")
+        self.assertEqual((leche.origen, leche.unidad_medida, leche.vida_util_dias), ("REAL", "UNIDAD", 12))
+        self.assertEqual((manzana.unidad_medida, manzana.vida_util_dias), ("PESO", 7))  # vida útil por categoría
+        self.assertEqual(str(manzana.precio_compra), "5.56")  # 70% del precio de venta
+        venta = Venta.objects.get(producto=manzana)
+        self.assertEqual((venta.cantidad, str(venta.precio_unitario), venta.promocion_aplicada), (12.35, "7.95", True))
+        self.assertEqual(len(res.avisos), 2)
+        self.assertFalse(Producto.objects.filter(codigo_upc="7401234567890").exists())  # la fila de ejemplo no entra
+
+    def test_reimportar_no_duplica(self):
+        ventas = [[self.hoy - timedelta(days=d), "7401005002118", 40, 11.5, "No"] for d in range(1, 6)]
+        self.subir(self.excel(self.productos_demo(), ventas))
+        self.subir(self.excel(self.productos_demo(), ventas))
+        self.assertEqual(Venta.objects.filter(producto__codigo_upc="7401005002118").count(), 5)
+
+    def test_csv_por_ticket_se_suma_por_dia(self):
+        crear_producto(nombre="Leche real", upc="7401005002118", origen=Producto.Origen.REAL)
+        ayer = (self.hoy - timedelta(days=1)).strftime("%d/%m/%Y")
+        csv_texto = "Fecha;Código;Cantidad;Precio\n" + "\n".join(f"{ayer};7401005002118;2;11,50" for _ in range(5))
+        archivo = BytesIO(csv_texto.encode("utf-8")); archivo.name = "ventas.csv"
+        self.subir(archivo)
+        self.assertEqual(Venta.objects.get().cantidad, 10)
+
+    def test_no_mezcla_con_productos_de_prueba(self):
+        crear_producto(nombre="Leche de prueba", upc="7401005002118")
+        res = self.subir(self.excel(self.productos_demo()[:1], [])).context["resultado"]
+        self.assertIn("producto de prueba", res.errores[0])
+        self.assertEqual(Producto.objects.get(codigo_upc="7401005002118").origen, "SIMULADO")
+
+    def test_errores_por_fila(self):
+        res = self.subir(self.excel(self.productos_demo(), [
+            ["no es fecha", "7401005002118", 3, 11.5, "No"],
+            [self.hoy - timedelta(days=1), "9999999", 3, 11.5, "No"],
+            [self.hoy + timedelta(days=3), "7401005002118", 3, 11.5, "No"],
+        ])).context["resultado"]
+        self.assertEqual(len(res.errores), 3)
+        self.assertEqual(Venta.objects.count(), 0)
+
+    def test_solo_el_administrador_importa(self):
+        self.client.force_login(crear_usuario("comprador.importar@test.com", Usuario.Rol.COMPRADOR))
+        self.assertEqual(self.client.get(reverse("importar_datos")).status_code, 403)
+
+    def test_el_proceso_nocturno_no_inventa_datos_a_productos_reales(self):
+        real = crear_producto(nombre="Leche real", upc="7401005002118", origen=Producto.Origen.REAL)
+        prueba = crear_producto(nombre="Queso de prueba", upc="7401005002119")
+        Venta.objects.create(producto=prueba, fecha=timezone.now() - timedelta(days=5), cantidad=3, precio_unitario=8)
+        call_command("actualizar_historial_ventas", stdout=StringIO())
+        self.assertFalse(Venta.objects.filter(producto=real).exists())
+        self.assertFalse(Inventario.objects.filter(producto=real).exists())
+        self.assertTrue(Venta.objects.filter(producto=prueba).count() > 1)
+
+    def test_reconstruir_inventario_no_toca_lotes_reales(self):
+        from core.inventario import reconstruir_inventario
+        real = crear_producto(nombre="Leche real", upc="7401005002118", origen=Producto.Origen.REAL)
+        lote = Inventario.objects.create(producto=real, cantidad=20, cantidad_inicial=20,
+                                         fecha_ingreso=self.hoy, fecha_vencimiento=self.hoy + timedelta(days=5))
+        Venta.objects.create(producto=real, fecha=timezone.now(), cantidad=3, precio_unitario=8)
+        reconstruir_inventario(Producto, Venta, Merma, Inventario, dar_de_baja_vencidos=True)
+        self.assertTrue(Inventario.objects.filter(pk=lote.pk, cantidad=20).exists())
+
+    def test_ventas_nuevas_descuentan_la_existencia_contada(self):
+        self.subir(self.excel(self.productos_demo(), []))
+        leche = Producto.objects.get(codigo_upc="7401005002118")
+        Inventario.objects.create(producto=leche, cantidad=50, cantidad_inicial=50,
+                                  fecha_ingreso=self.hoy, fecha_vencimiento=self.hoy + timedelta(days=10))
+        self.subir(self.excel(self.productos_demo(), [[self.hoy, "7401005002118", 18, 11.5, "No"]]))
+        self.assertEqual(Inventario.objects.get(producto=leche).cantidad, 32)
+
+
+class RegistrarExistenciaPasilloTests(TestCase):
+    """Conteo en el anaquel desde el Modo pasillo: entra un lote con la
+    cantidad contada y su vencimiento (así arranca el inventario real)."""
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        self.comprador = crear_usuario("comprador.existencia@test.com", Usuario.Rol.COMPRADOR)
+        self.manzana = crear_producto(nombre="Manzana roja", upc="2400345", origen=Producto.Origen.REAL,
+                                      unidad_medida=Producto.UnidadMedida.PESO, vida_util_dias=7,
+                                      categoria=Producto.Categoria.FRUTAS)
+
+    def test_la_ficha_ofrece_registrar_existencia(self):
+        self.client.force_login(self.comprador)
+        respuesta = self.client.get(reverse("modo_pasillo"), {"codigo": "2400345"})
+        self.assertContains(respuesta, "Registrar existencia")
+        self.assertContains(respuesta, (self.hoy + timedelta(days=7)).isoformat())
+
+    def test_registra_el_lote_y_vuelve_a_la_ficha(self):
+        self.client.force_login(self.comprador)
+        vence = (self.hoy + timedelta(days=6)).isoformat()
+        respuesta = self.client.post(reverse("registrar_existencia"), {
+            "producto": self.manzana.id_producto, "cantidad": "35.5", "vence": vence,
+        })
+        self.assertRedirects(respuesta, reverse("modo_pasillo") + "?codigo=2400345", fetch_redirect_response=False)
+        lote = Inventario.objects.get()
+        self.assertEqual((lote.cantidad, lote.cantidad_inicial, lote.fecha_vencimiento.isoformat()), (35.5, 35.5, vence))
+
+    def test_rechaza_vencimiento_pasado(self):
+        self.client.force_login(self.comprador)
+        self.client.post(reverse("registrar_existencia"), {
+            "producto": self.manzana.id_producto, "cantidad": "10", "vence": (self.hoy - timedelta(days=1)).isoformat(),
+        })
+        self.assertFalse(Inventario.objects.exists())
+
+    def test_el_gerente_no_registra_existencia(self):
+        self.client.force_login(crear_usuario("gerente.existencia@test.com", Usuario.Rol.GERENTE))
+        respuesta = self.client.post(reverse("registrar_existencia"), {"producto": self.manzana.id_producto, "cantidad": "1"})
+        self.assertEqual(respuesta.status_code, 403)

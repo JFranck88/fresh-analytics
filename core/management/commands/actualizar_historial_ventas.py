@@ -74,7 +74,9 @@ class Command(BaseCommand):
         else:
             hasta = ayer
 
-        productos = list(Producto.objects.filter(activo=True))
+        # Solo productos de prueba: los REALES reciben sus ventas por
+        # importación (core/importar.py), nunca inventadas.
+        productos = list(Producto.objects.filter(activo=True, origen=Producto.Origen.SIMULADO))
         fecha = desde
         dias_generados = 0
         while fecha <= hasta:

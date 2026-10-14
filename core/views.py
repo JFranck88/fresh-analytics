@@ -1716,6 +1716,11 @@ def modo_pasillo(request):
         "puede_registrar_merma": request.user.rol == "COMPRADOR" or request.user.is_superuser_admin,
         "puede_asignar_codigo": es_admin,
         "productos_para_asignar": productos_para_asignar,
+        # Conteo en el anaquel (core/views_datos.py): así arranca el
+        # inventario de un producto real del supermercado.
+        "puede_registrar_existencia": request.user.rol in ("COMPRADOR", "ADMINISTRADOR") or request.user.is_superuser_admin,
+        "vence_sugerido": hoy + timedelta(days=producto.vida_util_dias) if producto else None,
+        "hoy": hoy,
     }
     # ?parcial=1: solo la ficha, para el escaneo sin recargar la página.
     # En la T60 recargar haría perder el foco de la casilla, y el lector

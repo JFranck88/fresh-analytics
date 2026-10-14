@@ -54,6 +54,14 @@ class Producto(models.Model):
                    "sus códigos de barras (prefijo 2, peso codificado en el "
                    "propio código).",
     )
+    class Origen(models.TextChoices):
+        SIMULADO = "SIMULADO", "Datos de prueba"
+        REAL = "REAL", "Datos reales del supermercado"
+
+    # REAL: producto cargado desde el reporte de ventas del supermercado
+    # (pantalla Importar datos). El proceso nocturno no le inventa ventas,
+    # inventario ni mermas; sus ventas llegan solo por importación.
+    origen = models.CharField(max_length=10, choices=Origen.choices, default=Origen.SIMULADO)
     vida_util_dias = models.PositiveIntegerField()
     proveedor = models.CharField(max_length=100, blank=True, default="")
     precio_compra = models.DecimalField(max_digits=10, decimal_places=2)

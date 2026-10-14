@@ -117,6 +117,27 @@ Se usa dentro de modo_pasillo.html y también se devuelve solo, con
                 {% endif %}
                 <a href="{% url 'listar_predicciones' %}?producto={{ p.id_producto }}" class="btn btn-outline-secondary"><i class="bi bi-graph-up-arrow me-1"></i>Ver pronóstico</a>
             </div>
+            {% if puede_registrar_existencia %}
+                <details class="pasillo-existencia mt-3">
+                    <summary><i class="bi bi-box-seam me-1"></i>Registrar existencia (conteo en el anaquel)</summary>
+                    <form method="post" action="{% url 'registrar_existencia' %}" class="row g-2 mt-1">
+                        {% csrf_token %}
+                        <input type="hidden" name="producto" value="{{ p.id_producto }}">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Cantidad ({% if ficha.es_peso %}lb{% else %}unidades{% endif %})</label>
+                            <input type="number" name="cantidad" min="0" step="{% if ficha.es_peso %}0.01{% else %}1{% endif %}" inputmode="decimal" class="form-control" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Vence el</label>
+                            <input type="date" name="vence" value="{{ vence_sugerido|date:'Y-m-d' }}" min="{{ hoy|date:'Y-m-d' }}" class="form-control" required>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg me-1"></i>Agregar lote al inventario</button>
+                            <p class="small text-muted mt-1 mb-0">Si hay mercadería con distintas fechas de vencimiento, registra un lote por cada fecha.</p>
+                        </div>
+                    </form>
+                </details>
+            {% endif %}
             {% if ficha.fecha_corrida %}
                 <p class="text-muted small mt-2 mb-0">Modelo actualizado: {{ ficha.fecha_corrida|date:"d/m/Y" }}</p>
             {% endif %}

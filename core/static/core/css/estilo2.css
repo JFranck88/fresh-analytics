@@ -885,3 +885,6 @@ a.topbar-buscador-item:hover {
 .efectividad-numero { font-size: 28px; font-weight: 700; color: var(--bosque); line-height: 1.1; }
 .ganador-modelo { background: #D8F3DC; color: var(--bosque); }
 .ganador-comprador { background: #DBEAFE; color: #1E3A8A; }
+
+/* Registrar existencia desde el Modo pasillo (productos reales) */
+.pasillo-existencia summary { cursor: pointer; font-weight: 600; color: var(--bosque); }

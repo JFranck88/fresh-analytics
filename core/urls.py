@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, views_ordenes
+from . import views, views_datos, views_ordenes
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
@@ -10,6 +10,8 @@ urlpatterns = [
     path("buscar/", views.buscar_global, name="buscar_global"),
     path("pasillo/", views.modo_pasillo, name="modo_pasillo"),
     path("pasillo/asignar-codigo/", views.asignar_codigo_pasillo, name="asignar_codigo_pasillo"),
+    path("pasillo/existencia/", views_datos.registrar_existencia, name="registrar_existencia"),
+    path("importar/", views_datos.importar_datos, name="importar_datos"),
     path("buscar/json/", views.buscar_global_json, name="buscar_global_json"),
     path("productos/buscar-json/", views.buscar_productos_json, name="buscar_productos_json"),
     path("mermas/registrar/", views.registrar_merma, name="registrar_merma"),

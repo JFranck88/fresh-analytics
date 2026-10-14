@@ -282,16 +282,23 @@ def reconstruir_inventario(Producto, Venta, Merma, Inventario, hoy=None, semilla
     vuelven a generar en la simulación). La migración 0012 lo llama sin
     esa opción, porque su modelo histórico de Merma no tiene ese campo."""
     hoy = hoy or timezone.localdate()
-    Inventario.objects.all().delete()
+    productos = Producto.objects.filter(id_producto__in=Venta.objects.values("producto_id"))
+    # Los productos REALES (cargados del supermercado) tienen inventario
+    # contado en el anaquel: nunca se simulan ni se borran sus lotes. La
+    # migración 0012 usa un modelo histórico sin el campo "origen".
+    if any(f.name == "origen" for f in Producto._meta.get_fields()):
+        productos = productos.filter(origen="SIMULADO")
+    ids = list(productos.values_list("id_producto", flat=True))
+    Inventario.objects.filter(producto_id__in=ids).delete()
     if dar_de_baja_vencidos:
-        Merma.objects.filter(automatica=True).delete()
-    primera = Venta.objects.order_by("fecha").values_list("fecha", flat=True).first()
+        Merma.objects.filter(automatica=True, producto_id__in=ids).delete()
+    ventas = Venta.objects.filter(producto_id__in=ids)
+    primera = ventas.order_by("fecha").values_list("fecha", flat=True).first()
     if primera is None:
         return None
     desde = timezone.localtime(primera).date()
-    ultima = timezone.localtime(Venta.objects.order_by("-fecha").values_list("fecha", flat=True).first()).date()
+    ultima = timezone.localtime(ventas.order_by("-fecha").values_list("fecha", flat=True).first()).date()
     hasta = min(ultima, hoy)
-    productos = Producto.objects.filter(id_producto__in=Venta.objects.values("producto_id"))
     return simular_periodo(
         productos, desde, hasta, Venta, Merma, Inventario,
         reponer_hasta=hoy, rng=random.Random(semilla), inicio_historial=desde,

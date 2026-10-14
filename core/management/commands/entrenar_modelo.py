@@ -13,7 +13,7 @@ from core.clima import lluvia_sintetica, pronostico_lluvia_real
 DIAS_QUINCENA = [14, 15, 16, 29, 30, 31, 1]
 
 
-def obtener_serie_diaria(producto):
+def obtener_serie_diaria(producto, con_lluvia=True):
     filas = (
         Venta.objects.filter(producto=producto)
         .annotate(dia=TruncDate("fecha"))
@@ -27,20 +27,27 @@ def obtener_serie_diaria(producto):
     df = df.rename(columns={"dia": "ds", "total": "y"})
     df["ds"] = pd.to_datetime(df["ds"])
     df["es_quincena"] = df["ds"].dt.day.isin(DIAS_QUINCENA).astype(int)
-    df["lluvia"] = df["ds"].apply(lambda d: lluvia_sintetica(d.date()))
+    if con_lluvia:
+        df["lluvia"] = df["ds"].apply(lambda d: lluvia_sintetica(d.date()))
     return df
 
 
-def construir_modelo():
-    modelo = Prophet(interval_width=0.80, weekly_seasonality=True, yearly_seasonality=True)
+def construir_modelo(con_lluvia=True, anual=True):
+    """Productos REALES (2026-10-14): sin el regresor de lluvia, porque la
+    lluvia histórica que tiene FAs es simulada y no corresponde a su
+    historia; y estacionalidad anual solo con al menos dos años de datos."""
+    modelo = Prophet(interval_width=0.80, weekly_seasonality=True, yearly_seasonality=anual)
     modelo.add_country_holidays(country_name="GT")
     modelo.add_regressor("es_quincena")
-    modelo.add_regressor("lluvia")
+    if con_lluvia:
+        modelo.add_regressor("lluvia")
     return modelo
 
 
-def agregar_regresores_a_futuro(df_futuro, usar_pronostico_real=False):
+def agregar_regresores_a_futuro(df_futuro, usar_pronostico_real=False, con_lluvia=True):
     df_futuro["es_quincena"] = df_futuro["ds"].dt.day.isin(DIAS_QUINCENA).astype(int)
+    if not con_lluvia:
+        return df_futuro
 
     pronostico = pronostico_lluvia_real() if usar_pronostico_real else {}
 
@@ -72,7 +79,9 @@ class Command(BaseCommand):
         productos = Producto.objects.filter(activo=True)
 
         for producto in productos:
-            df = obtener_serie_diaria(producto)
+            es_real = producto.origen == Producto.Origen.REAL
+            con_lluvia = not es_real
+            df = obtener_serie_diaria(producto, con_lluvia=con_lluvia)
 
             if len(df) < 30:
                 self.stdout.write(
@@ -80,29 +89,37 @@ class Command(BaseCommand):
                 )
                 continue
 
-            corte = hoy - timedelta(days=7)
+            # La historia de un producto real puede terminar antes de ayer
+            # (el último reporte que mandó el supermercado): todo se mide
+            # desde su último día con datos, no desde hoy.
+            ultimo = df["ds"].max().date()
+            # Prophet recomienda 2 años para separar bien la temporada del año.
+            anual = (ultimo - df["ds"].min().date()).days >= 730
+            corte = ultimo - timedelta(days=6)
             df_entreno = df[df["ds"] < pd.Timestamp(corte)]
             df_real_reciente = df[df["ds"] >= pd.Timestamp(corte)]
 
             mape = None
             if len(df_entreno) >= 30 and not df_real_reciente.empty:
-                modelo_val = construir_modelo()
+                modelo_val = construir_modelo(con_lluvia, anual)
                 modelo_val.fit(df_entreno)
-                futuro_val = modelo_val.make_future_dataframe(periods=len(df_real_reciente))
-                futuro_val = agregar_regresores_a_futuro(futuro_val, usar_pronostico_real=False)
-                pronostico_val = modelo_val.predict(futuro_val).tail(len(df_real_reciente))
+                futuro_val = agregar_regresores_a_futuro(
+                    df_real_reciente[["ds"]].copy(), usar_pronostico_real=False, con_lluvia=con_lluvia,
+                )
+                pronostico_val = modelo_val.predict(futuro_val)
                 mape = calcular_mape(
                     df_real_reciente["y"].tolist(), pronostico_val["yhat"].tolist()
                 )
 
-            modelo = construir_modelo()
+            modelo = construir_modelo(con_lluvia, anual)
             modelo.fit(df)
-            futuro = modelo.make_future_dataframe(periods=7)
+            # Siempre los 7 días desde HOY, aunque la historia termine antes.
+            futuro = pd.DataFrame({"ds": pd.date_range(pd.Timestamp(hoy), periods=7, freq="D")})
             # Aquí sí usamos el pronóstico REAL de OpenWeatherMap para los
             # próximos días - es la única parte de todo el pipeline que
             # consulta clima real, no sintético.
-            futuro = agregar_regresores_a_futuro(futuro, usar_pronostico_real=True)
-            pronostico = modelo.predict(futuro).tail(7)
+            futuro = agregar_regresores_a_futuro(futuro, usar_pronostico_real=True, con_lluvia=con_lluvia)
+            pronostico = modelo.predict(futuro)
 
             Prediccion.objects.filter(producto=producto, fecha_prediccion=hoy).delete()
 
