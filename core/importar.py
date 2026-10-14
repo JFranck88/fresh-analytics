@@ -432,8 +432,13 @@ def importar(archivo, nombre):
     res = Resultado()
     try:
         tablas = leer_tablas(archivo, nombre)
-    except Exception:
-        res.error("No se pudo leer el archivo. Usa la plantilla de FAs en Excel (.xlsx) o un CSV.")
+    except Exception as error:
+        # Se muestra la causa técnica (2026-10-14: en Render faltaba openpyxl
+        # en requirements-render.txt y el mensaje no decía por qué).
+        res.error(
+            "No se pudo leer el archivo. Usa la plantilla de FAs en Excel (.xlsx) o un CSV. "
+            f"Detalle técnico: {type(error).__name__}: {error}"
+        )
         return res
 
     con_productos, con_ventas = [], []

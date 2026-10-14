@@ -3614,3 +3614,21 @@ class CodigoInternoConCerosTests(TestCase):
         self.client.force_login(comprador)
         ficha = self.client.get(reverse("modo_pasillo"), {"codigo": "1185"}).context["ficha"]
         self.assertEqual(ficha["producto"].nombre, "Aguacate Hass")
+
+
+class RequisitosRenderTests(TestCase):
+    """2026-10-14: Render instala requirements-render.txt (no requirements.txt)
+    y ahí faltaba openpyxl: en producción no se podía leer ningún Excel. Toda
+    librería que use la aplicación web debe estar en esa lista."""
+
+    def test_render_instala_lo_que_usa_la_aplicacion_web(self):
+        from pathlib import Path
+        from django.conf import settings
+        texto = (Path(settings.BASE_DIR) / "requirements-render.txt").read_text().lower()
+        for paquete in ("django", "gunicorn", "psycopg2-binary", "whitenoise", "reportlab", "requests", "openpyxl"):
+            self.assertIn(paquete + "==", texto, paquete)
+
+    def test_un_archivo_ilegible_explica_la_causa(self):
+        from core.importar import importar
+        archivo = BytesIO(b"esto no es un excel"); archivo.name = "roto.xlsx"
+        self.assertIn("Detalle técnico", importar(archivo, "roto.xlsx").errores[0])
