@@ -22,7 +22,9 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import urlencode
 from django.views.decorators.http import require_POST
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -53,6 +55,14 @@ def producto_del_filtro(request):
     if not valor.isdigit():
         return None
     return Producto.objects.filter(id_producto=int(valor)).first()
+
+
+def url_pasillo(producto):
+    """Ficha del producto en el Modo pasillo: por su código si lo tiene; si
+    no (producto sin código de barras), por su id."""
+    if producto.codigo_upc:
+        return reverse("modo_pasillo") + "?" + urlencode({"codigo": producto.codigo_upc})
+    return reverse("modo_pasillo") + "?" + urlencode({"producto": producto.id_producto})
 
 
 def texto_cantidad(producto, valor):

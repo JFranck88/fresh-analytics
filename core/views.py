@@ -23,7 +23,7 @@ from .forms import (
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta, DecisionHistorial
 from .efectividad import evaluar_decision, resumen as resumen_efectividad
 from .inventario import descontar_merma
-from .views_ordenes import crear_orden, leer_cantidad, orden_abierta_de, producto_del_filtro, registrar_decision
+from .views_ordenes import crear_orden, leer_cantidad, orden_abierta_de, producto_del_filtro, registrar_decision, url_pasillo
 from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_por_dia
 from .riesgo_descomposicion import calcular_riesgo_lote, primer_dia_que_sube_de_nivel
 
@@ -963,8 +963,8 @@ def registrar_merma(request):
                 messages.success(request, "Merma registrada correctamente y descontada del inventario.")
             # Si se llegó desde el Modo pasillo, se regresa a la ficha del
             # mismo producto para seguir recorriendo el pasillo.
-            if request.GET.get("volver") == "pasillo" and merma.producto.codigo_upc:
-                return redirect(_url_pasillo(merma.producto.codigo_upc))
+            if request.GET.get("volver") == "pasillo":
+                return redirect(url_pasillo(merma.producto))
             return redirect("dashboard")
     else:
         inicial = {"fecha": timezone.localdate()}
@@ -1721,6 +1721,14 @@ def modo_pasillo(request):
     hoy = timezone.localdate()
     codigo = limpiar_codigo(request.GET.get("codigo"))
     producto = buscar_producto_por_codigo(codigo) if codigo else None
+    # ?producto=<id>: resultado del buscador de la topbar estando en el
+    # Modo pasillo (2026-10-19, para buscar por nombre cuando no hay código
+    # de barras a mano). Antes ese resultado llevaba a Predicciones.
+    if not codigo:
+        producto = producto_del_filtro(request)
+        if producto and not producto.activo:
+            producto = None
+        codigo = (producto.codigo_upc or "") if producto else ""
 
     es_admin = request.user.rol == "ADMINISTRADOR" or request.user.is_superuser_admin
     # Un código que el sistema no conoce (por ejemplo, el de un empaque

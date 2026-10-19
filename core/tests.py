@@ -3695,6 +3695,26 @@ class BuscadorSeQuedaEnElModuloTests(TestCase):
         respuesta = self.client.get(reverse("buscar_global"), {"q": "aguacate", "desde": "cualquier_cosa"})
         self.assertContains(respuesta, f'href="{reverse("listar_predicciones")}?producto={self.aguacate.id_producto}"')
 
+    def test_modo_pasillo_muestra_la_ficha_del_producto_buscado(self):
+        # Sin código de barras a mano: se busca por nombre y el resultado
+        # abre la ficha en el mismo Modo pasillo (antes iba a Predicciones).
+        self.assertEqual(self.client.get(reverse("modo_pasillo")).context["url_destino_buscador"],
+                         reverse("modo_pasillo"))
+        respuesta = self.client.get(reverse("modo_pasillo"), {"producto": self.aguacate.id_producto})
+        self.assertEqual(respuesta.context["ficha"]["producto"], self.aguacate)
+        # También un producto que todavía no tiene código de barras.
+        sin_codigo = crear_producto(nombre="Cilantro manojo", upc=None)
+        respuesta = self.client.get(reverse("modo_pasillo"), {"producto": sin_codigo.id_producto})
+        self.assertEqual(respuesta.context["ficha"]["producto"], sin_codigo)
+        self.assertContains(respuesta, "Cilantro manojo")
+
+    def test_registrar_existencia_sin_codigo_vuelve_a_su_ficha(self):
+        sin_codigo = crear_producto(nombre="Cilantro manojo", upc=None)
+        respuesta = self.client.post(reverse("registrar_existencia"), {
+            "producto": sin_codigo.id_producto, "cantidad": "12", "vence": (self.hoy + timedelta(days=3)).isoformat(),
+        })
+        self.assertRedirects(respuesta, reverse("modo_pasillo") + f"?producto={sin_codigo.id_producto}")
+
     def test_guardar_ajuste_filtrado_vuelve_a_la_vista_filtrada(self):
         url = reverse("listar_recomendaciones") + f"?producto={self.aguacate.id_producto}"
         respuesta = self.client.post(url, {"accion": "guardar", f"ajuste_{self.aguacate.id_producto}": "45"})

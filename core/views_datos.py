@@ -14,7 +14,7 @@ from django.views.decorators.http import require_POST
 from .decorators import rol_requerido
 from .importar import importar
 from .models import Inventario, Producto
-from .views_ordenes import leer_cantidad, texto_cantidad
+from .views_ordenes import leer_cantidad, texto_cantidad, url_pasillo
 
 TAMANO_MAXIMO = 10 * 1024 * 1024  # 10 MB
 
@@ -43,7 +43,7 @@ def registrar_existencia(request):
     fecha de vencimiento. Así arranca el inventario de un producto real
     (el supermercado no lleva inventario por lote)."""
     producto = get_object_or_404(Producto, id_producto=request.POST.get("producto"), activo=True)
-    volver = f"{redirect('modo_pasillo').url}?codigo={producto.codigo_upc or ''}"
+    volver = url_pasillo(producto)
     cantidad, error = leer_cantidad(producto, request.POST.get("cantidad"))
     hoy = timezone.localdate()
     try:

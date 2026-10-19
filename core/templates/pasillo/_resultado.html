@@ -3,7 +3,7 @@ Resultado del Modo pasillo (ficha, código no registrado o estado inicial).
 Se usa dentro de modo_pasillo.html y también se devuelve solo, con
 ?parcial=1, cuando el escaneo se resuelve sin recargar la página.
 {% endcomment %}
-{% if not codigo %}
+{% if not codigo and not ficha %}
     <div class="card">
         <div class="estado-vacio">
             <i class="bi bi-upc-scan"></i>

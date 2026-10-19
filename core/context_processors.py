@@ -8,7 +8,8 @@ from .models import Alerta, OrdenCompra
 # ?producto=. Lo que no está aquí (Dashboard, Pasillo, Configuración...)
 # cae a Predicciones. 2026-10-19: Francisco vio en sus demos que desde
 # Recomendaciones y Órdenes de compra el buscador lo mandaba a
-# Predicciones; se agregaron esos dos módulos y Alertas.
+# Predicciones; se agregaron esos dos módulos, Alertas y el Modo pasillo
+# (ahí sirve para buscar por nombre cuando no hay código de barras a mano).
 DESTINO_BUSCADOR = {
     "listar_predicciones": "listar_predicciones",
     "historial_decisiones": "historial_decisiones",
@@ -18,6 +19,7 @@ DESTINO_BUSCADOR = {
     "listar_ordenes": "listar_ordenes",
     "detalle_orden": "listar_ordenes",
     "listar_alertas": "listar_alertas",
+    "modo_pasillo": "modo_pasillo",
 }
 
 
