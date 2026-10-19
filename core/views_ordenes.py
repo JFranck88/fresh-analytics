@@ -45,6 +45,16 @@ def _es_comprador(usuario):
     return usuario.rol == "COMPRADOR" or usuario.is_superuser_admin
 
 
+def producto_del_filtro(request):
+    """?producto=<id> que pone el buscador de la topbar (ver
+    DESTINO_BUSCADOR en context_processors.py). Un valor que no es número o
+    un producto que no existe se ignoran en vez de dar error."""
+    valor = request.GET.get("producto", "").strip()
+    if not valor.isdigit():
+        return None
+    return Producto.objects.filter(id_producto=int(valor)).first()
+
+
 def texto_cantidad(producto, valor):
     if valor is None:
         return "—"
@@ -133,6 +143,10 @@ def listar_ordenes(request):
     estado = request.GET.get("estado", "")
     if estado in OrdenCompra.Estado.values:
         ordenes = ordenes.filter(estado=estado)
+    # Buscador de la topbar: las órdenes que llevan ese producto.
+    producto_filtro = producto_del_filtro(request)
+    if producto_filtro:
+        ordenes = ordenes.filter(detalles__producto=producto_filtro).distinct()
     ordenes = list(ordenes[:100])
     # Lo que requiere acción de quien mira va primero.
     if _es_gerente(request.user):
@@ -143,6 +157,7 @@ def listar_ordenes(request):
         "ordenes": ordenes,
         "estado_filtro": estado,
         "estados": OrdenCompra.Estado.choices,
+        "producto_filtro": producto_filtro,
         "es_gerente": _es_gerente(request.user),
     })
 

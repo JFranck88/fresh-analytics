@@ -1965,8 +1965,10 @@ class BuscarTopbarModuloActualTests(TestCase):
     RiesgoDescomposicionFiltroPorProductoTests). En vez de arreglar
     módulo por módulo otra vez la próxima vez, esto verifica que CADA
     pantalla le informe correctamente al JS del buscador cuál es el
-    módulo actual (moduloActual), que es lo que decide a dónde manda un
-    resultado de producto/alerta."""
+    módulo actual, que es lo que decide a dónde manda un resultado de
+    producto/alerta. Desde 2026-10-19 eso lo calcula
+    context_processors.buscador (url_destino_buscador); ver también
+    BuscadorSeQuedaEnElModuloTests."""
 
     def setUp(self):
         self.gerente = crear_usuario("topbar.modulo.gerente@test.com", Usuario.Rol.GERENTE)
@@ -1974,23 +1976,23 @@ class BuscarTopbarModuloActualTests(TestCase):
 
     def test_dashboard_reporta_su_propio_modulo(self):
         respuesta = self.client.get(reverse("dashboard"))
-        self.assertContains(respuesta, "var moduloActual = 'dashboard';")
+        self.assertEqual(respuesta.context["url_destino_buscador"], reverse("listar_predicciones"))
 
     def test_predicciones_reporta_su_propio_modulo(self):
         respuesta = self.client.get(reverse("listar_predicciones"))
-        self.assertContains(respuesta, "var moduloActual = 'listar_predicciones';")
+        self.assertEqual(respuesta.context["url_destino_buscador"], reverse("listar_predicciones"))
 
     def test_historial_decisiones_reporta_su_propio_modulo(self):
         respuesta = self.client.get(reverse("historial_decisiones"))
-        self.assertContains(respuesta, "var moduloActual = 'historial_decisiones';")
+        self.assertEqual(respuesta.context["url_destino_buscador"], reverse("historial_decisiones"))
 
     def test_riesgo_descomposicion_reporta_su_propio_modulo(self):
         respuesta = self.client.get(reverse("riesgo_descomposicion"))
-        self.assertContains(respuesta, "var moduloActual = 'riesgo_descomposicion';")
+        self.assertEqual(respuesta.context["url_destino_buscador"], reverse("riesgo_descomposicion"))
 
     def test_listar_mermas_reporta_su_propio_modulo(self):
         respuesta = self.client.get(reverse("listar_mermas"))
-        self.assertContains(respuesta, "var moduloActual = 'listar_mermas';")
+        self.assertEqual(respuesta.context["url_destino_buscador"], reverse("listar_mermas"))
 
 
 class ProductoUnidadMedidaTests(TestCase):
@@ -3619,6 +3621,85 @@ class SerieDiariaPromocionTests(TestCase):
         serie = obtener_serie_diaria(yogurt, con_lluvia=False)
         self.assertEqual(list(serie["y"]), [19, 9])
         self.assertEqual(list(serie["promocion"]), [1, 0])
+
+
+class BuscadorSeQuedaEnElModuloTests(TestCase):
+    """2026-10-19, visto por Francisco en sus demos: buscando desde
+    Recomendaciones u Órdenes de compra, el buscador de la topbar lo mandaba
+    a Predicciones. Ahora el resultado se queda en el módulo, filtrado."""
+
+    def setUp(self):
+        from .models import OrdenCompra
+        self.OrdenCompra = OrdenCompra
+        self.hoy = timezone.localdate()
+        self.comprador = crear_usuario("comprador.buscador@test.com", Usuario.Rol.COMPRADOR)
+        self.aguacate = crear_producto(nombre="Aguacate Hass", upc="0000000001185")
+        self.yogurt = crear_producto(nombre="Yogurt Lala", upc="7893630210399")
+        for producto in (self.aguacate, self.yogurt):
+            Prediccion.objects.create(producto=producto, fecha_prediccion=self.hoy, fecha_pronosticada=self.hoy,
+                                      valor_predicho=50, intervalo_inferior=40, intervalo_superior=60)
+        self.client.force_login(self.comprador)
+
+    def test_destino_del_buscador_segun_el_modulo(self):
+        casos = {
+            "listar_recomendaciones": "listar_recomendaciones",
+            "listar_ordenes": "listar_ordenes",
+            "listar_alertas": "listar_alertas",
+            "dashboard": "listar_predicciones",
+        }
+        for modulo, destino in casos.items():
+            with self.subTest(modulo=modulo):
+                respuesta = self.client.get(reverse(modulo))
+                self.assertEqual(respuesta.context["url_destino_buscador"], reverse(destino))
+
+    def test_detalle_de_orden_busca_en_la_lista_de_ordenes(self):
+        self.client.post(reverse("listar_recomendaciones"), {
+            "accion": "enviar", f"ajuste_{self.aguacate.id_producto}": "50", f"ajuste_{self.yogurt.id_producto}": "0",
+        })
+        orden = self.OrdenCompra.objects.get()
+        respuesta = self.client.get(reverse("detalle_orden", args=[orden.id_orden]))
+        self.assertEqual(respuesta.context["url_destino_buscador"], reverse("listar_ordenes"))
+
+    def test_recomendaciones_filtra_por_producto(self):
+        respuesta = self.client.get(reverse("listar_recomendaciones"), {"producto": self.aguacate.id_producto})
+        self.assertEqual([r["producto"] for r in respuesta.context["recomendaciones"]], ["Aguacate Hass"])
+        self.assertContains(respuesta, "Mostrando solo: <strong>Aguacate Hass</strong>")
+        # Valor raro en la URL: se ignora en vez de dar error.
+        respuesta = self.client.get(reverse("listar_recomendaciones"), {"producto": "abc"})
+        self.assertEqual(len(respuesta.context["recomendaciones"]), 2)
+
+    def test_ordenes_filtra_las_que_llevan_el_producto(self):
+        self.client.post(reverse("listar_recomendaciones"), {
+            "accion": "enviar", f"ajuste_{self.aguacate.id_producto}": "50", f"ajuste_{self.yogurt.id_producto}": "0",
+        })
+        con_aguacate = self.client.get(reverse("listar_ordenes"), {"producto": self.aguacate.id_producto})
+        self.assertEqual(len(con_aguacate.context["ordenes"]), 1)
+        con_yogurt = self.client.get(reverse("listar_ordenes"), {"producto": self.yogurt.id_producto})
+        self.assertEqual(len(con_yogurt.context["ordenes"]), 0)
+        self.assertContains(con_yogurt, "No hay órdenes con Yogurt Lala")
+
+    def test_alertas_filtra_por_producto(self):
+        Alerta.objects.create(producto=self.aguacate, tipo=Alerta.Tipo.STOCK_BAJO, mensaje="Stock bajo de aguacate")
+        Alerta.objects.create(producto=self.yogurt, tipo=Alerta.Tipo.STOCK_BAJO, mensaje="Stock bajo de yogurt")
+        respuesta = self.client.get(reverse("listar_alertas"), {"producto": self.yogurt.id_producto})
+        self.assertEqual([a["producto"] for a in respuesta.context["alertas"]], ["Yogurt Lala"])
+
+    def test_enter_en_el_buscador_tampoco_saca_del_modulo(self):
+        # Desde Recomendaciones el formulario manda ?desde=listar_recomendaciones
+        # y la página completa de resultados enlaza a ese módulo.
+        self.assertContains(self.client.get(reverse("listar_recomendaciones")),
+                            '<input type="hidden" name="desde" value="listar_recomendaciones">')
+        respuesta = self.client.get(reverse("buscar_global"), {"q": "aguacate", "desde": "listar_recomendaciones"})
+        self.assertContains(respuesta, f'href="{reverse("listar_recomendaciones")}?producto={self.aguacate.id_producto}"')
+        # Un ?desde= desconocido cae a Predicciones.
+        respuesta = self.client.get(reverse("buscar_global"), {"q": "aguacate", "desde": "cualquier_cosa"})
+        self.assertContains(respuesta, f'href="{reverse("listar_predicciones")}?producto={self.aguacate.id_producto}"')
+
+    def test_guardar_ajuste_filtrado_vuelve_a_la_vista_filtrada(self):
+        url = reverse("listar_recomendaciones") + f"?producto={self.aguacate.id_producto}"
+        respuesta = self.client.post(url, {"accion": "guardar", f"ajuste_{self.aguacate.id_producto}": "45"})
+        self.assertRedirects(respuesta, url)
+        self.assertEqual(DecisionHistorial.objects.get().cantidad_ajustada, 45)
 
 
 class CodigoInternoConCerosTests(TestCase):

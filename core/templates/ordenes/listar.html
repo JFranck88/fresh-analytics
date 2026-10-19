@@ -12,10 +12,17 @@
     {% else %}Tus órdenes: si el Gerente rechaza una, corrígela y reenvíala; cuando esté aprobada, descarga el PDF y registra la recepción al llegar la mercadería.{% endif %}
 </p>
 
+{% if producto_filtro %}
+    <div class="alert alert-light border d-flex justify-content-between align-items-center mb-3 py-2">
+        <span>Mostrando solo las órdenes con: <strong>{{ producto_filtro.nombre }}</strong></span>
+        <a href="{% url 'listar_ordenes' %}{% if estado_filtro %}?estado={{ estado_filtro }}{% endif %}" class="small">Ver todas</a>
+    </div>
+{% endif %}
+
 <div class="d-flex gap-2 flex-wrap mb-3">
-    <a href="{% url 'listar_ordenes' %}" class="btn btn-sm {% if not estado_filtro %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Todas</a>
+    <a href="{% url 'listar_ordenes' %}{% if producto_filtro %}?producto={{ producto_filtro.id_producto }}{% endif %}" class="btn btn-sm {% if not estado_filtro %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Todas</a>
     {% for valor, texto in estados %}
-        <a href="?estado={{ valor }}" class="btn btn-sm {% if estado_filtro == valor %}btn-secondary{% else %}btn-outline-secondary{% endif %}">{{ texto }}</a>
+        <a href="?estado={{ valor }}{% if producto_filtro %}&amp;producto={{ producto_filtro.id_producto }}{% endif %}" class="btn btn-sm {% if estado_filtro == valor %}btn-secondary{% else %}btn-outline-secondary{% endif %}">{{ texto }}</a>
     {% endfor %}
 </div>
 
@@ -35,7 +42,7 @@
                     <td><a href="{% url 'detalle_orden' o.id_orden %}" class="btn btn-outline-secondary btn-sm">Ver</a></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>Todavía no hay órdenes{% if estado_filtro %} en este estado{% endif %}.</td></tr>
+                <tr><td colspan="7" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>{% if producto_filtro %}No hay órdenes con {{ producto_filtro.nombre }}{% if estado_filtro %} en este estado{% endif %}.{% else %}Todavía no hay órdenes{% if estado_filtro %} en este estado{% endif %}.{% endif %}</td></tr>
                 {% endfor %}
             </tbody>
         </table>

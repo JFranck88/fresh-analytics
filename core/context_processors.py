@@ -1,4 +1,40 @@
+from django.urls import reverse
+
 from .models import Alerta, OrdenCompra
+
+# Buscador de la topbar (base.html y la página /buscar/): a qué pantalla
+# lleva un resultado de producto o de alerta según el módulo desde el que
+# se buscó. Clave: módulo actual; valor: pantalla que sabe filtrar por
+# ?producto=. Lo que no está aquí (Dashboard, Pasillo, Configuración...)
+# cae a Predicciones. 2026-10-19: Francisco vio en sus demos que desde
+# Recomendaciones y Órdenes de compra el buscador lo mandaba a
+# Predicciones; se agregaron esos dos módulos y Alertas.
+DESTINO_BUSCADOR = {
+    "listar_predicciones": "listar_predicciones",
+    "historial_decisiones": "historial_decisiones",
+    "riesgo_descomposicion": "riesgo_descomposicion",
+    "listar_mermas": "listar_mermas",
+    "listar_recomendaciones": "listar_recomendaciones",
+    "listar_ordenes": "listar_ordenes",
+    "detalle_orden": "listar_ordenes",
+    "listar_alertas": "listar_alertas",
+}
+
+
+def buscador(request):
+    """Módulo desde el que se busca y URL a la que van los resultados.
+    En la página completa /buscar/ (al presionar Enter) el módulo viaja en
+    ?desde=, para que esa página tampoco saque a nadie de donde estaba."""
+    coincidencia = getattr(request, "resolver_match", None)
+    modulo = coincidencia.url_name if coincidencia else ""
+    if modulo == "buscar_global":
+        modulo = request.GET.get("desde", "")
+    if modulo not in DESTINO_BUSCADOR:
+        modulo = ""
+    return {
+        "modulo_buscador": modulo,
+        "url_destino_buscador": reverse(DESTINO_BUSCADOR.get(modulo, "listar_predicciones")),
+    }
 
 
 def alertas_globales(request):

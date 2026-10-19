@@ -8,6 +8,12 @@
         <a href="{% url 'listar_alertas' %}" class="small">Ver todas</a>
     </div>
 {% endif %}
+{% if producto_filtro %}
+    <div class="alert alert-light border d-flex justify-content-between align-items-center mb-3 py-2">
+        <span>Mostrando solo: <strong>{{ producto_filtro.nombre }}</strong></span>
+        <a href="{% url 'listar_alertas' %}" class="small">Ver todas</a>
+    </div>
+{% endif %}
 
 <div class="card">
     <div class="card-body p-0">
@@ -32,7 +38,7 @@
         {% else %}
             <div class="estado-vacio">
                 <i class="bi bi-check-circle"></i>
-                {% if tipo_filtro %}Todo en orden. No hay alertas de {{ tipo_filtro_texto|lower }} en este momento.{% else %}Estado general óptimo: no hay alertas activas en este momento.{% endif %}
+                {% if producto_filtro %}No hay alertas activas para {{ producto_filtro.nombre }}.{% elif tipo_filtro %}Todo en orden. No hay alertas de {{ tipo_filtro_texto|lower }} en este momento.{% else %}Estado general óptimo: no hay alertas activas en este momento.{% endif %}
             </div>
         {% endif %}
     </div>

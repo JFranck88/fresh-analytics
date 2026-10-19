@@ -94,6 +94,7 @@
             </button>
             <form method="get" action="{% url 'buscar_global' %}" class="topbar-buscador d-flex" id="formBuscadorTopbar">
                 <i class="bi bi-search"></i>
+                {% if modulo_buscador %}<input type="hidden" name="desde" value="{{ modulo_buscador }}">{% endif %}
                 <input type="search" name="q" id="inputBuscadorTopbar" placeholder="Buscar producto, lote, alerta…" value="{{ request.GET.q }}" autocomplete="off" enterkeyhint="search">
                 <div id="resultadosBuscadorTopbar" class="topbar-buscador-resultados"></div>
             </form>
@@ -188,24 +189,15 @@
         var temporizador;
         var consultaActual = '';
 
-        // A qué módulo debe llevar un resultado de producto/alerta (bug
-        // reportado por Francisco, primero en Predicciones+Alertas y
-        // luego otra vez en Riesgo climático): este buscador es un
-        // componente ÚNICO compartido por todas las pantallas, así que
-        // antes el destino estaba fijo a Predicciones sin importar en
-        // qué módulo se buscara - te sacaba de donde estabas. Ahora, si
-        // el módulo actual sabe mostrar un producto puntual (filtro
-        // ?producto=), el resultado se queda ahí; si no (Dashboard,
-        // Alertas, Recomendaciones, etc.), cae a Predicciones por
-        // defecto, igual que antes.
-        var MODULOS_CON_FILTRO_PRODUCTO = {
-            'listar_predicciones': '{% url "listar_predicciones" %}',
-            'historial_decisiones': '{% url "historial_decisiones" %}',
-            'riesgo_descomposicion': '{% url "riesgo_descomposicion" %}',
-            'listar_mermas': '{% url "listar_mermas" %}'
-        };
-        var moduloActual = '{{ request.resolver_match.url_name }}';
-        var urlDestinoProducto = MODULOS_CON_FILTRO_PRODUCTO[moduloActual] || '{% url "listar_predicciones" %}';
+        // A qué módulo lleva un resultado de producto/alerta: el buscador
+        // es el MISMO en todas las pantallas, así que el resultado se
+        // queda en el módulo actual si ese módulo sabe filtrar por
+        // producto (?producto=); si no, va a Predicciones. La lista de
+        // módulos está en core/context_processors.py (DESTINO_BUSCADOR):
+        // antes estaba aquí y no incluía Recomendaciones ni Órdenes de
+        // compra (bug visto por Francisco en sus demos, 2026-10-19).
+        var urlDestinoProducto = '{{ url_destino_buscador }}';
+        var moduloBuscador = '{{ modulo_buscador }}';
 
         function ocultar() {
             resultados.classList.remove('mostrando');
@@ -266,7 +258,7 @@
             datos.lotes.forEach(function (l) { resultados.appendChild(filaLote(l)); });
 
             var verTodos = document.createElement('a');
-            verTodos.href = urlPagina + '?q=' + encodeURIComponent(consulta);
+            verTodos.href = urlPagina + '?q=' + encodeURIComponent(consulta) + (moduloBuscador ? '&desde=' + moduloBuscador : '');
             verTodos.className = 'topbar-buscador-ver-todos';
             verTodos.textContent = 'Ver todos los resultados para "' + consulta + '"';
             resultados.appendChild(verTodos);

@@ -23,7 +23,7 @@ from .forms import (
 from .models import Venta, Merma, Inventario, Prediccion, Producto, Usuario, Configuracion, Alerta, DecisionHistorial
 from .efectividad import evaluar_decision, resumen as resumen_efectividad
 from .inventario import descontar_merma
-from .views_ordenes import crear_orden, leer_cantidad, orden_abierta_de, registrar_decision
+from .views_ordenes import crear_orden, leer_cantidad, orden_abierta_de, producto_del_filtro, registrar_decision
 from .clima import pronostico_lluvia_real, pronostico_temperatura_humedad_por_dia
 from .riesgo_descomposicion import calcular_riesgo_lote, primer_dia_que_sube_de_nivel
 
@@ -890,6 +890,10 @@ def listar_alertas(request):
     )
     if tipo_filtro:
         alertas_qs = alertas_qs.filter(tipo=tipo_filtro)
+    # Buscador de la topbar estando en Alertas: se queda aquí, filtrado.
+    producto_filtro = producto_del_filtro(request)
+    if producto_filtro:
+        alertas_qs = alertas_qs.filter(producto=producto_filtro)
 
     alertas = [
         {
@@ -906,6 +910,7 @@ def listar_alertas(request):
         "alertas": alertas,
         "tipo_filtro": tipo_filtro,
         "tipo_filtro_texto": dict(Alerta.Tipo.choices).get(tipo_filtro),
+        "producto_filtro": producto_filtro,
     })
 
 
@@ -1236,16 +1241,18 @@ def listar_recomendaciones(request):
             registrar_decision(producto, request.user, fecha_max, sugerido, cantidad_ajustada, stock)
             lineas.append((producto, sugerido, cantidad_ajustada))
 
+        # get_full_path(): si la lista estaba filtrada por el buscador
+        # (?producto=), se vuelve a la misma vista filtrada.
         if not enviar:
             messages.success(request, "Ajustes guardados en el historial de decisiones.")
-            return redirect("listar_recomendaciones")
+            return redirect(request.get_full_path())
         if hubo_error:
             messages.error(request, "La orden no se envió: corrige las cantidades marcadas y vuelve a intentarlo.")
-            return redirect("listar_recomendaciones")
+            return redirect(request.get_full_path())
         orden = crear_orden(request.user, fecha_max, lineas)
         if orden is None:
             messages.error(request, "La orden no se envió: todas las cantidades quedaron en 0.")
-            return redirect("listar_recomendaciones")
+            return redirect(request.get_full_path())
         messages.success(request, f"Orden {orden.numero} enviada a aprobación del Gerente.")
         return redirect("detalle_orden", id_orden=orden.id_orden)
 
@@ -1254,6 +1261,12 @@ def listar_recomendaciones(request):
     # esos productos, en vez de solo mostrar un número (petición de
     # Francisco, 2026-09-18).
     solo_pendientes = request.GET.get("pendientes") == "1"
+    # Buscador de la topbar estando en Recomendaciones (2026-10-19): antes
+    # el resultado llevaba a Predicciones; ahora se queda aquí, filtrado.
+    producto_filtro = producto_del_filtro(request)
+    productos = Producto.objects.filter(activo=True)
+    if producto_filtro:
+        productos = productos.filter(id_producto=producto_filtro.id_producto)
 
     # UC-01, flujo alterno 3a: si el modelo no tiene predicción para un
     # producto, se avisa y su recomendación queda desactivada (no se puede
@@ -1263,7 +1276,7 @@ def listar_recomendaciones(request):
     ) if fecha_max else set()
 
     recomendaciones = []
-    for producto in Producto.objects.filter(activo=True):
+    for producto in productos:
         if producto.id_producto not in con_prediccion:
             if not solo_pendientes:
                 recomendaciones.append({
@@ -1300,6 +1313,7 @@ def listar_recomendaciones(request):
     return render(request, "listar_recomendaciones.html", {
         "recomendaciones": recomendaciones,
         "solo_pendientes": solo_pendientes,
+        "producto_filtro": producto_filtro,
         "orden_abierta": orden_abierta_de(request.user),
     })
 
