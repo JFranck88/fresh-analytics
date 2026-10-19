@@ -3758,6 +3758,38 @@ class NombresConCaracteresEspecialesTests(TestCase):
         self.assertIn("escaparHtml(info.nombre)", contenido)  # buscador de Predicciones
 
 
+class FiltrosConValoresRarosTests(TestCase):
+    """Revisión del 2026-10-19: Mermas, Riesgo climático e Historial de
+    decisiones daban error 500 si la URL traía ?producto=abc (o una fecha
+    mal escrita en el Historial). Ahora el valor raro se ignora."""
+
+    def setUp(self):
+        self.gerente = crear_usuario("gerente.filtros@test.com", Usuario.Rol.GERENTE)
+        self.leche = crear_producto(nombre="Leche entera 1L", upc="7401234500999")
+        self.client.force_login(self.gerente)
+
+    def test_producto_que_no_es_numero_no_da_error(self):
+        for vista in ("listar_mermas", "riesgo_descomposicion", "historial_decisiones",
+                      "listar_predicciones", "listar_alertas", "listar_ordenes"):
+            with self.subTest(vista=vista):
+                respuesta = self.client.get(reverse(vista), {"producto": "abc"})
+                self.assertEqual(respuesta.status_code, 200)
+
+    def test_fecha_mal_escrita_en_el_historial_no_da_error(self):
+        respuesta = self.client.get(reverse("historial_decisiones"), {"desde": "2026-13-45", "hasta": "ayer"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual((respuesta.context["desde"], respuesta.context["hasta"]), ("", ""))
+
+    def test_el_filtro_valido_sigue_funcionando(self):
+        otro = crear_producto(nombre="Queso fresco", upc="7401234500998")
+        hoy = timezone.localdate()
+        Merma.objects.create(producto=self.leche, cantidad=2, motivo=Merma.Motivo.DANO, fecha=hoy, costo_perdida=12)
+        Merma.objects.create(producto=otro, cantidad=1, motivo=Merma.Motivo.DANO, fecha=hoy, costo_perdida=8)
+        respuesta = self.client.get(reverse("listar_mermas"), {"producto": self.leche.id_producto})
+        self.assertEqual([m.producto for m in respuesta.context["mermas"]], [self.leche])
+        self.assertEqual(respuesta.context["producto_filtro"], self.leche)
+
+
 class CodigoInternoConCerosTests(TestCase):
     """El aguacate del supermercado tiene código interno 0000000001185: en el
     Modo pasillo se puede escribir o escanear solo 1185."""

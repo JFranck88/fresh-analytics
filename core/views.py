@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib import messages
 from django.core.paginator import Paginator
@@ -940,6 +940,16 @@ def marcar_alerta_leida(request, alerta_id):
     return redirect("listar_alertas")
 
 
+def _fecha_iso(texto):
+    """'2026-10-19' si el texto es una fecha válida; si no, ''."""
+    texto = (texto or "").strip()
+    try:
+        date.fromisoformat(texto)
+    except ValueError:
+        return ""
+    return texto
+
+
 def _texto_cantidad(producto, valor):
     """'12,50 lb' para peso variable, '3 u.' por unidad (coma decimal es-GT)."""
     if producto.unidad_medida == Producto.UnidadMedida.PESO:
@@ -995,11 +1005,12 @@ def listar_mermas(request):
     # Mismo criterio que en riesgo_descomposicion (ver ahí el porqué): el
     # buscador global de la topbar puede traer aquí un producto puntual
     # desde cualquier módulo.
-    producto_id = request.GET.get("producto", "").strip()
-    producto_filtro = None
-    if producto_id:
-        mermas_qs = mermas_qs.filter(producto_id=producto_id)
-        producto_filtro = Producto.objects.filter(id_producto=producto_id).first()
+    # producto_del_filtro: un ?producto= que no es número se ignora (antes
+    # daba error 500; revisión del 2026-10-19).
+    producto_filtro = producto_del_filtro(request)
+    producto_id = producto_filtro.id_producto if producto_filtro else ""
+    if producto_filtro:
+        mermas_qs = mermas_qs.filter(producto=producto_filtro)
 
     paginador = Paginator(mermas_qs, REGISTROS_POR_PAGINA)
     mermas = paginador.get_page(request.GET.get("pagina"))
@@ -1027,8 +1038,8 @@ def riesgo_descomposicion(request):
     # buscador terminaba mandando siempre a Predicciones en su lugar,
     # sacando al usuario de Riesgo climático sin necesidad. Mismo criterio
     # aplicado en listar_mermas.
-    producto_id = request.GET.get("producto", "").strip()
-    producto_filtro = Producto.objects.filter(id_producto=producto_id).first() if producto_id else None
+    producto_filtro = producto_del_filtro(request)
+    producto_id = producto_filtro.id_producto if producto_filtro else None
     producto_fuera_de_alcance = producto_filtro is not None and producto_filtro.categoria not in (
         Producto.Categoria.FRUTAS, Producto.Categoria.VERDURAS,
     )
@@ -1341,12 +1352,15 @@ def historial_decisiones(request):
     if not es_gerente:
         historial_qs = historial_qs.filter(usuario=request.user)
 
-    producto_id = request.GET.get("producto", "").strip()
-    desde = request.GET.get("desde", "").strip()
-    hasta = request.GET.get("hasta", "").strip()
+    # Un ?producto= que no es número o una fecha mal escrita se ignoran
+    # (antes daban error 500; revisión del 2026-10-19).
+    producto_filtro = producto_del_filtro(request)
+    producto_id = producto_filtro.id_producto if producto_filtro else ""
+    desde = _fecha_iso(request.GET.get("desde"))
+    hasta = _fecha_iso(request.GET.get("hasta"))
 
-    if producto_id:
-        historial_qs = historial_qs.filter(producto_id=producto_id)
+    if producto_filtro:
+        historial_qs = historial_qs.filter(producto=producto_filtro)
     if desde:
         historial_qs = historial_qs.filter(fecha_decision__date__gte=desde)
     if hasta:
