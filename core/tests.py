@@ -3722,6 +3722,42 @@ class BuscadorSeQuedaEnElModuloTests(TestCase):
         self.assertEqual(DecisionHistorial.objects.get().cantidad_ajustada, 45)
 
 
+class NombresConCaracteresEspecialesTests(TestCase):
+    """Revisión del 2026-10-19: los nombres de producto vienen del Excel del
+    supermercado. Uno con < o & no debe romper las páginas ni interpretarse
+    como HTML (ni en los JSON que van dentro de <script> ni en los buscadores
+    que arman el resultado con innerHTML)."""
+
+    NOMBRE = '</script><img src=x onerror=alert(1)> Queso & "crema"'
+
+    def setUp(self):
+        self.gerente = crear_usuario("gerente.nombres@test.com", Usuario.Rol.GERENTE)
+        self.producto = crear_producto(nombre=self.NOMBRE, upc="7400000000777")
+        hoy = timezone.localdate()
+        Prediccion.objects.create(producto=self.producto, fecha_prediccion=hoy, fecha_pronosticada=hoy,
+                                  valor_predicho=10, intervalo_inferior=5, intervalo_superior=15)
+        self.client.force_login(self.gerente)
+
+    def test_json_para_script_escapa_lo_que_cerraria_la_etiqueta(self):
+        from .views import json_para_script
+        texto = json_para_script({"nombre": "</script>&"})
+        self.assertNotIn("<", texto)
+        self.assertEqual(json.loads(texto), {"nombre": "</script>&"})
+
+    def test_las_paginas_con_graficas_no_insertan_el_nombre_crudo(self):
+        for vista in ("dashboard", "listar_predicciones", "tendencia_aprendizaje_modelo"):
+            with self.subTest(vista=vista):
+                respuesta = self.client.get(reverse(vista))
+                self.assertEqual(respuesta.status_code, 200)
+                self.assertNotIn("</script><img", respuesta.content.decode())
+
+    def test_los_buscadores_escapan_el_nombre(self):
+        contenido = self.client.get(reverse("listar_predicciones")).content.decode()
+        self.assertIn("function escaparHtml", contenido)
+        self.assertIn("escaparHtml(p.nombre)", contenido)  # buscador de la topbar
+        self.assertIn("escaparHtml(info.nombre)", contenido)  # buscador de Predicciones
+
+
 class CodigoInternoConCerosTests(TestCase):
     """El aguacate del supermercado tiene código interno 0000000001185: en el
     Modo pasillo se puede escribir o escanear solo 1185."""

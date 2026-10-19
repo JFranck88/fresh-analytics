@@ -590,6 +590,14 @@ def calcular_tendencia_aprendizaje(hoy):
     return resultado
 
 
+def json_para_script(datos):
+    """json.dumps para insertar dentro de <script> con |safe. Escapa < > &
+    para que un nombre de producto con "</script>" (los nombres vienen del
+    Excel del supermercado desde 2026-10-14) no cierre la etiqueta antes
+    de tiempo. Mismo criterio que el filtro json_script de Django."""
+    return json.dumps(datos).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
 @rol_requerido("ADMINISTRADOR", "GERENTE", "COMPRADOR")
 def dashboard(request):
     hoy = timezone.localdate()
@@ -689,8 +697,8 @@ def dashboard(request):
         "modelo_al_dia": modelo_al_dia,
         "dias_desde_prediccion": dias_desde_prediccion,
         "fecha_prediccion_max": fecha_prediccion_max,
-        "ventas_labels_json": json.dumps(ventas_labels),
-        "ventas_datos_json": json.dumps(ventas_datos),
+        "ventas_labels_json": json_para_script(ventas_labels),
+        "ventas_datos_json": json_para_script(ventas_datos),
     }
     return render(request, "dashboard.html", contexto)
 
@@ -1168,12 +1176,12 @@ def listar_predicciones(request):
         "predicciones": predicciones,
         "fecha_corrida": fecha_max,
         "modelo_al_dia": dias_desde_prediccion == 0,
-        "datos_grafica_json": json.dumps(datos_grafica),
-        "datos_departamento_json": json.dumps(datos_departamento),
-        "info_productos_json": json.dumps(info_productos),
-        "info_dias_json": json.dumps(info_dias),
+        "datos_grafica_json": json_para_script(datos_grafica),
+        "datos_departamento_json": json_para_script(datos_departamento),
+        "info_productos_json": json_para_script(info_productos),
+        "info_dias_json": json_para_script(info_dias),
         "mensajes_contexto": mensajes_contexto,
-        "dias_lluvia_json": json.dumps(dias_lluvia),
+        "dias_lluvia_json": json_para_script(dias_lluvia),
     })
 
 
@@ -1193,8 +1201,8 @@ def tendencia_aprendizaje_modelo(request):
         for p in productos
     }
     return render(request, "tendencia_aprendizaje.html", {
-        "info_productos_json": json.dumps(info_productos),
-        "tendencia_aprendizaje_json": json.dumps(calcular_tendencia_aprendizaje(hoy)),
+        "info_productos_json": json_para_script(info_productos),
+        "tendencia_aprendizaje_json": json_para_script(calcular_tendencia_aprendizaje(hoy)),
     })
 
 

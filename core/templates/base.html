@@ -12,6 +12,17 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link href="{% static 'core/css/estilo2.css' %}" rel="stylesheet">
     {% include "pwa/_cabecera.html" %}
+    <script>
+        // Los nombres de producto llegan por JSON y se arman con innerHTML.
+        // Desde que se importan del Excel del supermercado (2026-10-14) un
+        // nombre puede traer < o &: sin escapar se vería roto o, peor, el
+        // navegador lo interpretaría como HTML. Revisión del 2026-10-19.
+        function escaparHtml(texto) {
+            return String(texto == null ? '' : texto).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+    </script>
 </head>
 <body>
 <div class="app-shell" id="appShell">
@@ -208,9 +219,9 @@
             var div = document.createElement('a');
             div.href = urlDestinoProducto + '?producto=' + encodeURIComponent(p.id);
             div.className = 'topbar-buscador-item';
-            div.innerHTML = '<span class="topbar-buscador-item-upc">' + (p.upc || '—') + '</span>' +
-                '<span class="topbar-buscador-item-texto"><strong>' + p.nombre + '</strong>' +
-                ' <span class="text-muted small">— ' + p.categoria + '</span></span>';
+            div.innerHTML = '<span class="topbar-buscador-item-upc">' + escaparHtml(p.upc || '—') + '</span>' +
+                '<span class="topbar-buscador-item-texto"><strong>' + escaparHtml(p.nombre) + '</strong>' +
+                ' <span class="text-muted small">— ' + escaparHtml(p.categoria) + '</span></span>';
             return div;
         }
 
@@ -228,16 +239,16 @@
             // de saltar siempre al módulo de Alertas.
             div.href = urlDestinoProducto + '?producto=' + encodeURIComponent(a.producto_id);
             div.className = 'topbar-buscador-item';
-            div.innerHTML = '<span class="badge bg-' + a.nivel + '">&nbsp;</span>' +
-                '<span class="topbar-buscador-item-texto"><strong>' + a.producto + '</strong> — ' + a.mensaje + '</span>';
+            div.innerHTML = '<span class="badge bg-' + escaparHtml(a.nivel) + '">&nbsp;</span>' +
+                '<span class="topbar-buscador-item-texto"><strong>' + escaparHtml(a.producto) + '</strong> — ' + escaparHtml(a.mensaje) + '</span>';
             return div;
         }
 
         function filaLote(l) {
             var div = document.createElement('div');
             div.className = 'topbar-buscador-item topbar-buscador-item-estatico';
-            div.innerHTML = '<span class="topbar-buscador-item-texto"><strong>' + l.lote + '</strong>' +
-                ' <span class="text-muted small">— ' + l.producto + ' · vence ' + l.fecha_vencimiento + '</span></span>';
+            div.innerHTML = '<span class="topbar-buscador-item-texto"><strong>' + escaparHtml(l.lote) + '</strong>' +
+                ' <span class="text-muted small">— ' + escaparHtml(l.producto) + ' · vence ' + escaparHtml(l.fecha_vencimiento) + '</span></span>';
             return div;
         }
 
