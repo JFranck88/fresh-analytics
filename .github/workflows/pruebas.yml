@@ -1,0 +1,55 @@
+name: Pruebas en Postgres
+
+# Corre todas las pruebas contra un Postgres 16 (como Neon en producción)
+# en cada push a main. En la PC las pruebas usan SQLite, que acepta cosas
+# que Postgres no: así se escapó el error "max(boolean)" del 2026-10-14.
+# Usa una base de datos desechable creada aquí mismo, NUNCA la de producción.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fa
+          POSTGRES_PASSWORD: fa
+          POSTGRES_DB: fa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://fa:fa@localhost:5432/fa
+      SECRET_KEY: solo-para-pruebas-en-github
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Cachear cmdstan (motor de Prophet)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-cmdstanpy-1.3.0
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+          pip install tblib
+
+      - name: Correr las pruebas en Postgres
+        run: python manage.py test core.tests --parallel 4 --noinput
