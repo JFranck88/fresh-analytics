@@ -14,6 +14,7 @@ manual completa, pero cubre las rutas críticas.
 import json
 import re
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from io import BytesIO, StringIO
 from unittest.mock import patch
 
@@ -3788,6 +3789,131 @@ class FiltrosConValoresRarosTests(TestCase):
         respuesta = self.client.get(reverse("listar_mermas"), {"producto": self.leche.id_producto})
         self.assertEqual([m.producto for m in respuesta.context["mermas"]], [self.leche])
         self.assertEqual(respuesta.context["producto_filtro"], self.leche)
+
+
+class FuenteSuperposFalsa:
+    """Imita core.superpos.FuenteSuperpos sin MySQL: las filas tienen las
+    mismas columnas que devuelven las consultas a superpos."""
+
+    def __init__(self, productos, ventas, vida=None):
+        self._productos, self._ventas, self._vida = productos, ventas, vida or {}
+
+    def productos(self, departamentos, categorias, codigos=None):
+        filas = [p for p in self._productos if p["departamento"] in departamentos or p["categoria"] in categorias]
+        if codigos:
+            filas = [p for p in filas if p["upc"] in codigos or p["plu"] in codigos]
+        return filas
+
+    def ventas(self, sucursal, codigos, desde, hasta):
+        return [v for v in self._ventas if v["sucursal"] == sucursal and v["upc"] in codigos and desde <= v["fecha"] <= hasta]
+
+    def vida_util_estimada(self, codigos, desde):
+        return self._vida
+
+    def cerrar(self):
+        pass
+
+
+def fila_producto_superpos(upc, nombre, departamento, categoria=None, peso="0", precio=6.45, costo=4.62, sucursal=1, plu=None):
+    return {"upc": upc, "plu": plu, "sucursal": sucursal, "desc_larga": nombre, "desc_corta": nombre[:20],
+            "precio": Decimal(str(precio)), "costo": costo, "costo_promedio": None, "peso_variable": peso,
+            "departamento": departamento, "categoria": categoria, "proveedor": "Proveedor S.A."}
+
+
+class ImportarSuperposTests(TestCase):
+    """2026-11-16: conector con la base del punto de venta del supermercado
+    (superpos, MySQL 5.1). Lee ventasdiarias y productos (solo lectura) y los
+    carga como productos REALES, con la misma lógica de Importar datos."""
+
+    def setUp(self):
+        from .superpos import importar_desde_superpos
+        self.importar = importar_desde_superpos
+        self.ayer = timezone.localdate() - timedelta(days=1)
+
+    def ventas(self, upc, dias, cantidad, precio, sucursal=1, oferta_dias=()):
+        filas = []
+        for i in range(dias):
+            fecha = self.ayer - timedelta(days=i)
+            filas.append({"sucursal": sucursal, "upc": upc, "fecha": fecha, "cantidad": Decimal(str(cantidad)),
+                          "monto": Decimal(str(round(cantidad * precio, 2))), "oferta": 1 if i in oferta_dias else 0})
+        return filas
+
+    def test_carga_productos_reales_con_categoria_unidad_y_ventas(self):
+        fuente = FuenteSuperposFalsa(
+            [fila_producto_superpos("7893630210399", "YOGURT LALA FRESA 200G", 7),
+             fila_producto_superpos("2000000004087", "TOMATE MANZANO LIBRA", 5, categoria=51, peso="1", precio=6.5, costo=3.1),
+             fila_producto_superpos("7401234000001", "ARROZ 1 LB", 1)],
+            self.ventas("7893630210399", 10, 12, 6.45, oferta_dias=(0, 1))
+            + self.ventas("2000000004087", 10, 40.25, 6.5)
+            + self.ventas("7893630210399", 10, 99, 6.45, sucursal=2),
+            vida={"7893630210399": (41.6, 12)},
+        )
+        res = self.importar(fuente, 1, {7: "LACTEOS", 5: "FRUTAS"}, {51: "VERDURAS"})
+        self.assertEqual(res.errores, [])
+        yogurt = Producto.objects.get(codigo_upc="7893630210399")
+        tomate = Producto.objects.get(codigo_upc="2000000004087")
+        self.assertEqual((yogurt.origen, yogurt.categoria, yogurt.unidad_medida, yogurt.vida_util_dias),
+                         (Producto.Origen.REAL, "LACTEOS", "UNIDAD", 42))  # vida útil de las recepciones
+        self.assertEqual((tomate.categoria, tomate.unidad_medida), ("VERDURAS", "PESO"))  # la categoría manda
+        self.assertFalse(Producto.objects.filter(codigo_upc="7401234000001").exists())  # abarrotes no
+        ventas_yogurt = Venta.objects.filter(producto=yogurt)
+        self.assertEqual(ventas_yogurt.aggregate(t=Sum("cantidad"))["t"], 120)  # solo la sucursal 1
+        self.assertEqual(ventas_yogurt.filter(promocion_aplicada=True).count(), 2)
+        self.assertAlmostEqual(Venta.objects.filter(producto=tomate).aggregate(t=Sum("cantidad"))["t"], 402.5)
+
+    def test_reimportar_no_duplica_y_simular_no_guarda(self):
+        fuente = FuenteSuperposFalsa([fila_producto_superpos("7893630210399", "YOGURT LALA", 7)],
+                                     self.ventas("7893630210399", 5, 10, 6.45))
+        self.importar(fuente, 1, {7: "LACTEOS"}, simular=True)
+        self.assertFalse(Producto.objects.exists())
+        self.importar(fuente, 1, {7: "LACTEOS"})
+        self.importar(fuente, 1, {7: "LACTEOS"})
+        self.assertEqual(Venta.objects.count(), 5)
+
+    def test_peso_en_kilos_se_convierte_a_libras(self):
+        fuente = FuenteSuperposFalsa([fila_producto_superpos("2000000009001", "LOMITO DE RES", 9, peso="1", precio=88.0, costo=61.7)],
+                                     self.ventas("2000000009001", 3, 10, 88.0))
+        self.importar(fuente, 1, {9: "CARNES"}, peso_en="kg")
+        lomito = Producto.objects.get(codigo_upc="2000000009001")
+        self.assertAlmostEqual(float(Venta.objects.filter(producto=lomito).aggregate(t=Sum("cantidad"))["t"]), 3 * 22.05, places=1)
+        self.assertAlmostEqual(float(lomito.precio_venta), 88.0 / 2.20462, places=2)
+
+    def test_no_pisa_un_producto_de_prueba_con_el_mismo_codigo(self):
+        crear_producto(nombre="Yogurt natural", upc="7893630210399")
+        fuente = FuenteSuperposFalsa([fila_producto_superpos("7893630210399", "YOGURT LALA", 7)],
+                                     self.ventas("7893630210399", 3, 10, 6.45))
+        res = self.importar(fuente, 1, {7: "LACTEOS"})
+        self.assertTrue(any("producto de prueba" in e for e in res.errores))
+        self.assertEqual(Producto.objects.get(codigo_upc="7893630210399").nombre, "Yogurt natural")
+        self.assertFalse(Venta.objects.exists())
+
+    def test_prefiere_la_ficha_de_la_sucursal_y_filtra_la_lista_del_piloto(self):
+        fuente = FuenteSuperposFalsa(
+            [fila_producto_superpos("0000000001185", "AGUACATE (SUC 2)", 5, sucursal=2, plu="1185"),
+             fila_producto_superpos("0000000001185", "AGUACATE HASS UNIDAD", 5, sucursal=1, plu="1185"),
+             fila_producto_superpos("2000000004087", "TOMATE", 5, peso="1")],
+            self.ventas("0000000001185", 3, 300, 4.35),
+        )
+        self.importar(fuente, 1, {5: "FRUTAS"}, codigos=["1185"])
+        self.assertEqual(list(Producto.objects.values_list("nombre", flat=True)), ["AGUACATE HASS UNIDAD"])
+
+    def test_mapeo_de_la_linea_de_comandos(self):
+        from .superpos import leer_mapeo
+        self.assertEqual(leer_mapeo("5=FRUTAS, 7=lácteos"), {5: "FRUTAS", 7: "LACTEOS"})
+        for malo in ("5", "5=ABARROTES", "x=FRUTAS"):
+            with self.subTest(malo=malo), self.assertRaises(ValueError):
+                leer_mapeo(malo)
+
+    def test_el_comando_pide_sucursal_y_mapeo(self):
+        from django.core.management.base import CommandError
+        with patch("core.management.commands.importar_superpos.FuenteSuperpos") as Fuente:
+            with self.assertRaisesMessage(CommandError, "--sucursal"):
+                call_command("importar_superpos", "--departamentos", "7=LACTEOS", stdout=StringIO())
+            Fuente.return_value = FuenteSuperposFalsa([fila_producto_superpos("7893630210399", "YOGURT LALA", 7)],
+                                                      self.ventas("7893630210399", 7, 10, 6.45))
+            salida = StringIO()
+            call_command("importar_superpos", "--sucursal", "1", "--departamentos", "7=LACTEOS", "--ultimos-dias", "3", stdout=salida)
+        self.assertIn("YOGURT LALA: 3 días", salida.getvalue())
 
 
 class CodigoInternoConCerosTests(TestCase):

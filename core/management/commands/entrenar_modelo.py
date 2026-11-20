@@ -132,11 +132,14 @@ class Command(BaseCommand):
             # (el último reporte que mandó el supermercado): todo se mide
             # desde su último día con datos, no desde hoy.
             ultimo = df["ds"].max().date()
-            # Prophet recomienda 2 años para separar bien la temporada del año.
-            anual = (ultimo - df["ds"].min().date()).days >= 730
             corte = ultimo - timedelta(days=6)
             df_entreno = df[df["ds"] < pd.Timestamp(corte)]
             df_real_reciente = df[df["ds"] >= pd.Timestamp(corte)]
+            # Prophet recomienda 2 años para separar bien la temporada del año.
+            # Se mide sobre lo que entrena la prueba de la última semana (que
+            # deja fuera 7 días): con exactamente 2 años de historia, Prophet
+            # avisaba "less than 730 days" en esa prueba (2026-11-16).
+            anual = not df_entreno.empty and (df_entreno["ds"].max() - df["ds"].min()).days >= 730
 
             if es_real:
                 configuraciones = [

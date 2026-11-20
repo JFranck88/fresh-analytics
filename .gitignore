@@ -7,3 +7,8 @@ venv/
 # Archivos temporales de Python
 __pycache__/
 *.pyc
+
+# Respaldos de bases de datos: pueden traer datos del supermercado
+*.sql
+*.sql.gz
+*.dump
